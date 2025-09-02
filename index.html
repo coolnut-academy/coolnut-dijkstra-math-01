@@ -206,11 +206,11 @@
                     <div id="emergency-results-content" class="space-y-3">
                         <!-- Route details will be injected here -->
                     </div>
-                    <div id="emergency-intermediate-section" class="mt-4 hidden">
+                    <div id="emergency-intermediate-hospitals-section" class="mt-4 hidden">
                         <h3 class="font-semibold text-gray-700">โรงพยาบาลที่เป็นทางผ่าน:</h3>
-                        <ul id="emergency-intermediate-list" class="text-sm mt-2 space-y-2">
+                        <div id="emergency-intermediate-list" class="text-sm mt-2 space-y-2">
                             <!-- Intermediate hospitals will be injected here -->
-                        </ul>
+                        </div>
                     </div>
                 </section>
             </div>
@@ -568,7 +568,7 @@
             const emergencyCaseSelect = document.getElementById('emergency-case');
             const resultsPanelEmergency = document.getElementById('emergency-results-panel');
             const resultsContentEmergency = document.getElementById('emergency-results-content');
-            const emergencyIntermediateSection = document.getElementById('emergency-intermediate-section');
+            const emergencyIntermediateSection = document.getElementById('emergency-intermediate-hospitals-section');
             const emergencyIntermediateList = document.getElementById('emergency-intermediate-list');
             let emergencyMap, userMarker, emergencyRoutingControl;
             let isEmergencyInitialized = false;
@@ -588,94 +588,6 @@
                 testLocationBtn.addEventListener('click', testLocation);
                 resetEmergencyBtn.addEventListener('click', resetEmergencyMap);
                 isEmergencyInitialized = true;
-            }
-            
-            function getEmergencyRouteTime(startLatLng, endLatLng) {
-                return new Promise((resolve, reject) => {
-                    const tempRouter = L.Routing.control({
-                        waypoints: [startLatLng, endLatLng],
-                        createMarker: () => null,
-                        routeWhileDragging: false,
-                        addWaypoints: false,
-                        draggableWaypoints: false,
-                        fitSelectedRoutes: false,
-                        show: false
-                    });
-
-                    const onRouteFound = (e) => {
-                        const time = e.routes[0].summary.totalTime / 60;
-                        emergencyMap.removeControl(tempRouter);
-                        resolve(time);
-                    };
-
-                    const onRouteError = (e) => {
-                        console.error("Emergency intermediate route error:", e);
-                        emergencyMap.removeControl(tempRouter);
-                        reject(e.error);
-                    };
-                    
-                    tempRouter.on('routesfound', onRouteFound);
-                    tempRouter.on('routingerror', onRouteError);
-                    tempRouter.addTo(emergencyMap);
-                });
-            }
-            
-            async function findEmergencyIntermediateHospitals(userLatLng, targetHospitals, mainRoute) {
-                emergencyIntermediateSection.classList.remove('hidden');
-                emergencyIntermediateList.innerHTML = '<li class="text-gray-500">กำลังค้นหาโรงพยาบาลทางผ่าน...</li>';
-
-                const routeCoordinates = mainRoute.coordinates;
-                const otherHospitals = hospitalData.filter(h => 
-                    !targetHospitals.some(target => target.Hospital_TH === h.Hospital_TH)
-                );
-                
-                const candidates = otherHospitals.filter(hospital => {
-                    const hospitalLatLng = L.latLng(hospital.Latitude, hospital.Longitude);
-                    for (let i = 0; i < routeCoordinates.length; i += 5) { // Check every 5th coord for performance
-                        if (hospitalLatLng.distanceTo(routeCoordinates[i]) < 8000) { // 8km threshold for emergency
-                            return true;
-                        }
-                    }
-                    return false;
-                });
-
-                if (candidates.length === 0) {
-                    emergencyIntermediateList.innerHTML = '<li class="text-gray-500">ไม่พบโรงพยาบาลใกล้เคียงบนเส้นทาง</li>';
-                    return;
-                }
-                
-                const results = [];
-
-                // Process candidates sequentially to avoid overwhelming the routing service
-                for (const candidate of candidates.slice(0, 8)) { // Limit to 8 candidates for performance
-                    try {
-                        const candidateLatLng = L.latLng(candidate.Latitude, candidate.Longitude);
-                        const time = await getEmergencyRouteTime(userLatLng, candidateLatLng);
-                        results.push({ 
-                            name: candidate.Hospital_TH, 
-                            time: time,
-                            type: candidate.Type,
-                            specialty: candidate.Specialty 
-                        });
-                    } catch (error) {
-                        console.warn(`Could not calculate route for ${candidate.Hospital_TH}:`, error);
-                    }
-                }
-                
-                if (results.length === 0) {
-                    emergencyIntermediateList.innerHTML = '<li class="text-gray-500">ไม่สามารถคำนวณเวลาสำหรับโรงพยาบาลทางผ่านได้</li>';
-                    return;
-                }
-
-                results.sort((a, b) => a.time - b.time);
-
-                emergencyIntermediateList.innerHTML = results.map(r => 
-                    `<li class="border-b border-gray-200 pb-2 mb-2">
-                        <div class="font-medium text-gray-800">${r.name}</div>
-                        <div class="text-sm text-gray-600">เวลา: ${formatTime(r.time)} จากตำแหน่งคุณ</div>
-                        <div class="text-xs text-gray-500">${r.type}${r.specialty ? ` • ${r.specialty}` : ''}</div>
-                    </li>`
-                ).join('');
             }
             
             function testLocation() {
@@ -734,6 +646,87 @@
                     },
                     options
                 );
+            }
+            
+            async function findEmergencyIntermediateHospitals(waypoints, mainRoute) {
+                emergencyIntermediateSection.classList.remove('hidden');
+                emergencyIntermediateList.innerHTML = '<div class="text-gray-500 text-sm">🔍 กำลังค้นหาโรงพยาบาลทางผ่าน...</div>';
+
+                const routeCoordinates = mainRoute.coordinates;
+                const usedHospitalNames = waypoints.map(wp => wp.name);
+                const otherHospitals = hospitalData.filter(h => !usedHospitalNames.includes(h.Hospital_TH));
+                
+                // Find hospitals near the route
+                const candidates = otherHospitals.filter(hospital => {
+                    const hospitalLatLng = L.latLng(hospital.Latitude, hospital.Longitude);
+                    for (let i = 0; i < routeCoordinates.length; i += 10) { // Check every 10th coord for performance
+                        if (hospitalLatLng.distanceTo(routeCoordinates[i]) < 8000) { // 8km threshold for emergency
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                if (candidates.length === 0) {
+                    emergencyIntermediateList.innerHTML = '<div class="text-gray-500 text-sm">ไม่พบโรงพยาบาลใกล้เคียงบนเส้นทาง</div>';
+                    return;
+                }
+                
+                const userLatLng = waypoints[0].latLng;
+                const results = [];
+
+                // Calculate route times for candidates
+                for (const candidate of candidates.slice(0, 8)) { // Limit to 8 hospitals for performance
+                    try {
+                        const candidateLatLng = L.latLng(candidate.Latitude, candidate.Longitude);
+                        const distance = userLatLng.distanceTo(candidateLatLng) / 1000; // km
+                        const estimatedTime = distance / 60 * 60; // Rough estimate: 60km/h average speed
+                        
+                        results.push({ 
+                            hospital: candidate,
+                            name: candidate.Hospital_TH, 
+                            time: estimatedTime,
+                            distance: distance
+                        });
+                    } catch (error) {
+                        console.warn(`Could not calculate route for ${candidate.Hospital_TH}:`, error);
+                    }
+                }
+                
+                if (results.length === 0) {
+                    emergencyIntermediateList.innerHTML = '<div class="text-gray-500 text-sm">ไม่สามารถคำนวณเวลาสำหรับโรงพยาบาลทางผ่านได้</div>';
+                    return;
+                }
+
+                // Sort by estimated time and display
+                results.sort((a, b) => a.time - b.time);
+                
+                let intermediateHtml = '';
+                results.slice(0, 5).forEach((result, index) => { // Show top 5
+                    const hospital = result.hospital;
+                    intermediateHtml += `
+                        <div class="bg-blue-50 border border-blue-200 p-3 rounded-lg">
+                            <div class="flex items-start justify-between">
+                                <div class="flex-1">
+                                    <h4 class="font-semibold text-blue-800">${result.name}</h4>
+                                    <p class="text-xs text-blue-600 mt-1">ประเภท: ${hospital.Type}</p>
+                                    ${hospital.Specialty ? `<p class="text-xs text-blue-600">ความเชี่ยวชาญ: ${hospital.Specialty}</p>` : ''}
+                                </div>
+                                <div class="text-right text-sm">
+                                    <p class="font-bold text-blue-800">${formatTime(result.time)}</p>
+                                    <p class="text-xs text-blue-600">${result.distance.toFixed(1)} กม.</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                emergencyIntermediateList.innerHTML = `
+                    <div class="text-sm text-gray-700 mb-3">
+                        <p class="font-semibold">โรงพยาบาลทางผ่านที่ใกล้ที่สุด ${results.length > 5 ? '(แสดง 5 อันดับแรก)' : ''}:</p>
+                    </div>
+                    ${intermediateHtml}
+                `;
             }
             
             function resetEmergencyMap() {
@@ -890,10 +883,6 @@
 
             function displayMultiStopEmergencyRoute(waypoints) {
                 if (emergencyRoutingControl) emergencyMap.removeControl(emergencyRoutingControl);
-                
-                // Reset intermediate section
-                emergencyIntermediateSection.classList.add('hidden');
-                emergencyIntermediateList.innerHTML = '';
 
                 const distinctWaypoints = waypoints.filter((waypoint, index, self) =>
                     index === self.findIndex((w) => (
@@ -907,12 +896,39 @@
                 }
 
                 emergencyRoutingControl = L.Routing.control({ 
-                    waypoints: distinctWaypoints.map(wp => wp.latLng)
+                    waypoints: distinctWaypoints.map(wp => wp.latLng),
+                    routeWhileDragging: false,
+                    addWaypoints: false,
+                    createMarker: function(i, waypoint, n) {
+                        const isStart = i === 0;
+                        const isEnd = i === n - 1;
+                        let icon, popupText;
+                        
+                        if (isStart) {
+                            icon = redIcon;
+                            popupText = "ตำแหน่งของคุณ";
+                        } else {
+                            icon = L.icon({
+                                iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzAwNzBmMyIgd2lkdGg9IjMwcHgiIGhlaWdodD0iMzBweCI+PHBhdGggZD0iTTEyIDJDOC4xMyAyIDUgNS4xMyA1IDljMCA1LjI1IDcgMTMgNyAxMyA3LTcuNzUgNy0xMyA3LTlTMTUuODcgMiAxMiAyem0wIDEyLjVjLTEuOTMgMC0zLjUtMS41Ny0zLjUtMy41UzEwLjA3IDYgMTIgNiBzMy41IDEuNTcgMy41IDMuNS0xLjU3IDMuNS0zLjUgMy41eiIvPjwvc3ZnPg==',
+                                iconSize: [30, 30],
+                                iconAnchor: [15, 30],
+                                popupAnchor: [0, -30]
+                            });
+                            popupText = distinctWaypoints[i].name;
+                        }
+                        
+                        return L.marker(waypoint.latLng, { icon: icon }).bindPopup(popupText);
+                    }
                 }).addTo(emergencyMap);
 
                 emergencyRoutingControl.on('routesfound', e => {
                     const route = e.routes[0];
                     const selectedCase = emergencyCaseSelect.value;
+                    
+                    // Fit map to route bounds
+                    const routeBounds = L.latLngBounds(distinctWaypoints.map(wp => wp.latLng));
+                    emergencyMap.fitBounds(routeBounds, { padding: [20, 20] });
+                    
                     let caseDisplayName = '';
                     
                     switch(selectedCase) {
@@ -925,8 +941,8 @@
                     
                     resultsContentEmergency.innerHTML = `
                         <div class="bg-red-100 border border-red-300 p-3 rounded-lg mb-4">
-                            <h3 class="font-bold text-red-800">กรณีฉุกเฉิน: ${caseDisplayName}</h3>
-                            <p class="text-sm text-red-700">แผนการเดินทางที่แนะนำ</p>
+                            <h3 class="font-bold text-red-800">🚨 กรณีฉุกเฉิน: ${caseDisplayName}</h3>
+                            <p class="text-sm text-red-700">แผนการเดินทางที่แนะนำ (${distinctWaypoints.length - 1} ${distinctWaypoints.length > 2 ? 'จุดหมาย' : 'จุดหมาย'})</p>
                         </div>
                     `;
                     
@@ -952,7 +968,7 @@
                         ` : '';
                         
                         const legHtml = `
-                            <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded-r-lg mb-3 emergency-card">
+                            <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded-r-lg mb-3">
                                 <div class="flex items-center space-x-2 mb-2">
                                     <div class="bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">${index + 1}</div>
                                     <p class="font-semibold text-gray-800">${from} → ${to}</p>
@@ -998,21 +1014,10 @@
                     `;
                     resultsContentEmergency.innerHTML += summaryHtml;
 
+                    // Find intermediate hospitals along the route
+                    findEmergencyIntermediateHospitals(distinctWaypoints, route);
+
                     resultsPanelEmergency.classList.remove('hidden');
-                    
-                    // Set map bounds to show the route properly
-                    const bounds = L.latLngBounds(distinctWaypoints.map(wp => wp.latLng));
-                    emergencyMap.fitBounds(bounds, { padding: [50, 50] });
-                    
-                    // Find intermediate hospitals after main route is calculated
-                    const targetHospitals = distinctWaypoints.slice(1).map(wp => 
-                        hospitalData.find(h => h.Hospital_TH === wp.name)
-                    ).filter(h => h);
-                    
-                    if (targetHospitals.length > 0) {
-                        const userLatLng = distinctWaypoints[0].latLng;
-                        findEmergencyIntermediateHospitals(userLatLng, targetHospitals, route);
-                    }
                 });
             }
         });
