@@ -3,484 +3,1020 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ER Route Finder: ระบบค้นหาเส้นทางส่งต่อผู้ป่วยฉุกเฉิน</title>
+    <title>ระบบเครือข่ายโรงพยาบาลและการส่งต่อฉุกเฉิน</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Leaflet Map Library -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <!-- LeafletJS Map Library -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- Leaflet Routing Machine -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700;800&display=swap" rel="stylesheet">
-    
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+
     <style>
-        body {
-            font-family: 'Sarabun', sans-serif;
-            --ambulance-red: #d90429;
-            --ambulance-blue: #0077b6;
-            --dark-blue: #023e8a;
-            --light-gray: #f8f9fa;
-            --medium-gray: #e9ecef;
+        body { font-family: 'Sarabun', sans-serif; }
+        .font-mono { font-family: 'Fira Code', monospace; }
+        .leaflet-routing-container { display: none; }
+        #map-planner, #map-emergency {
+             height: 100vh;
+             width: 100%;
+             z-index: 10;
         }
-        .leaflet-container {
-            border-radius: 1rem;
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        @media (max-width: 768px) {
+            #map-planner, #map-emergency { height: 60vh; }
         }
-        .pulse-btn {
-            box-shadow: 0 0 0 0 rgba(217, 4, 41, 0.7);
-            animation: pulse 1.5s infinite;
+        #analysis-text::after {
+            content: '_';
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+        .page { display: none; }
+        .page.active { display: block; }
+        .flex-page.active { display: flex; }
+        
+        /* Emergency status animations */
+        .status-loading {
+            animation: pulse 2s infinite;
         }
         @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(217, 4, 41, 0.7); }
-            70% { box-shadow: 0 0 0 15px rgba(217, 4, 41, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(217, 4, 41, 0); }
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
         }
-        .leaflet-popup-content-wrapper {
-            background: var(--dark-blue);
-            color: white;
-            border-radius: 8px;
+        
+        /* Emergency result cards */
+        .emergency-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
-        .leaflet-popup-content {
-            font-size: 14px;
-            font-weight: 500;
-        }
-        .leaflet-popup-tip {
-            background: var(--dark-blue);
+        .emergency-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
     </style>
 </head>
-<body class="bg-light-gray">
+<body class="bg-gray-100 antialiased">
 
-    <!-- 
-      Responsive Main Container:
-      - flex-col: Default layout for mobile (vertical stack).
-      - md:flex-row: Switches to a horizontal layout on tablets (768px) and larger screens.
-    -->
-    <div class="min-h-screen flex flex-col md:flex-row">
-        <!-- 
-          Responsive Control Panel:
-          - w-full: Takes full width on mobile.
-          - md:w-1/3 lg:w-1/4: Takes a fraction of the width on tablets and desktops.
-          - md:max-h-screen: Prevents the panel from being taller than the screen on wider layouts, enabling internal scrolling.
-        -->
-        <div class="w-full md:w-1/3 lg:w-1/4 p-4 bg-white shadow-lg overflow-y-auto md:max-h-screen">
-            <header class="text-center p-4 border-b-4 border-ambulance-red">
-                <div class="flex justify-center items-center gap-3">
-                    <svg class="w-12 h-12 text-ambulance-red" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                    </svg>
-                    <div>
-                        <h1 class="text-2xl font-extrabold text-dark-blue">ER Route Finder</h1>
-                        <p class="text-sm text-gray-500">แม่ฮ่องสอน - เชียงใหม่</p>
-                    </div>
-                </div>
-            </header>
-
-            <div class="space-y-6 mt-6">
-                <!-- Case Selection -->
-                <div class="p-4 bg-medium-gray rounded-xl">
-                    <label for="case-selector" class="block text-lg font-bold text-dark-blue mb-2">1. เลือกสถานการณ์ฉุกเฉิน</label>
-                    <select id="case-selector" class="w-full p-3 border border-gray-300 rounded-lg text-lg focus:ring-2 focus:ring-ambulance-blue focus:border-ambulance-blue">
-                        <option value="stroke">ภาวะหลอดเลือดสมอง (Stroke)</option>
-                        <option value="heart">ภาวะหัวใจขาดเลือด (STEMI)</option>
-                        <option value="trauma">อุบัติเหตุรุนแรง (Trauma)</option>
-                        <option value="all">แสดงโรงพยาบาลทั้งหมด</option>
-                    </select>
-                </div>
-
-                <!-- Action Panel -->
-                <div class="p-4 bg-medium-gray rounded-xl">
-                    <h2 class="text-lg font-bold text-dark-blue mb-3">2. เลือกการดำเนินการ</h2>
-                    
-                    <div class="space-y-3">
-                        <p class="font-semibold text-gray-700">A) ค้นหาเส้นทางระหว่างโรงพยาบาล</p>
-                        <select id="path-start" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-ambulance-blue"></select>
-                        <div class="text-center font-bold text-gray-500">ถึง</div>
-                        <select id="path-end" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-ambulance-blue"></select>
-                        <button id="find-path-btn" class="w-full bg-ambulance-blue text-white font-bold py-3 px-4 rounded-lg hover:bg-dark-blue transition-all duration-300 flex items-center justify-center gap-2">
-                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-                             </svg>
-                            ค้นหาเส้นทาง
-                        </button>
-                    </div>
-
-                    <div class="my-4 border-t border-gray-300"></div>
-                    
-                    <div>
-                        <p class="font-semibold text-gray-700 mb-3">B) ค้นหา รพ. ที่ใกล้ที่สุดจากจุดเกิดเหตุ</p>
-                        <button id="find-nearest-btn" class="w-full bg-ambulance-red text-white font-bold py-3 px-4 rounded-lg hover:bg-red-700 transition-all duration-300 flex items-center justify-center gap-2 pulse-btn">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-                            </svg>
-                            ปักหมุดจุดเกิดเหตุ
-                        </button>
-                        <p id="pin-mode-status" class="text-center text-sm text-ambulance-red mt-2 h-4"></p>
-                    </div>
-                </div>
-                
-                 <div id="result-card" class="p-4 bg-white rounded-xl border-2 border-dark-blue min-h-[150px]">
-                    <h2 class="text-lg font-bold text-dark-blue mb-2">สรุปผลการค้นหา</h2>
-                    <div id="result-text" class="text-gray-700 space-y-2">
-                        <p>กรุณาเลือกการดำเนินการ</p>
-                    </div>
-                </div>
-
+    <!-- Landing Page -->
+    <div id="landing-page" class="page active">
+        <div class="min-h-screen bg-gray-900 text-white flex flex-col items-center justify-center p-4">
+            <div class="text-center">
+                <h1 class="text-4xl md:text-5xl font-bold">Hospital Network & Route Planner</h1>
+                <p class="mt-2 text-lg text-gray-400">ระบบจำลองเครือข่ายและค้นหาเส้นทางส่งต่อผู้ป่วยฉุกเฉิน</p>
             </div>
-        </div>
-
-        <!-- Display Area -->
-        <div class="flex-1 flex flex-col p-4 gap-4">
-            <!-- View Toggler -->
-            <div class="flex justify-center bg-medium-gray p-1 rounded-xl shadow-sm">
-                <button id="show-map-btn" class="flex-1 py-2 px-4 rounded-lg font-bold">แผนที่จริง</button>
-                <button id="show-graph-btn" class="flex-1 py-2 px-4 rounded-lg font-bold">Graph Model</button>
-            </div>
-
-            <!-- Graph Theory View Container -->
-            <div id="graph-view" class="bg-white rounded-2xl p-4 flex-1 flex-col hidden min-h-[40vh] md:min-h-0">
-                <h2 class="text-xl font-bold text-dark-blue mb-3 text-center">แบบจำลองเครือข่าย (Graph Model)</h2>
-                <div class="flex-1 w-full relative">
-                     <canvas id="network-canvas" class="w-full h-full"></canvas>
+            <div class="mt-12 grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl">
+                <!-- Planner Mode Button -->
+                <div class="bg-gray-800 p-8 rounded-lg border border-gray-700 hover:border-blue-500 transition-all duration-300 transform hover:scale-105">
+                    <h2 class="text-2xl font-semibold text-blue-400">จำลองเส้นทาง (Planner Mode)</h2>
+                    <p class="mt-2 text-gray-300">ใช้สำหรับวางแผน วิเคราะห์ และเปรียบเทียบเส้นทางการส่งต่อผู้ป่วยระหว่างโรงพยาบาลต่างๆ ในเครือข่าย</p>
+                    <button id="goto-planner-btn" class="mt-6 w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition">
+                        เข้าสู่โหมดจำลอง
+                    </button>
+                </div>
+                <!-- Emergency Mode Button -->
+                <div class="bg-gray-800 p-8 rounded-lg border border-gray-700 hover:border-green-500 transition-all duration-300 transform hover:scale-105">
+                    <h2 class="text-2xl font-semibold text-green-400">ค้นหาฉุกเฉิน (Emergency Mode)</h2>
+                    <p class="mt-2 text-gray-300">ใช้ตำแหน่งปัจจุบันของคุณ เพื่อค้นหาโรงพยาบาลที่ใกล้ที่สุดโดยอัตโนมัติสำหรับกรณีฉุกเฉิน</p>
+                     <button id="goto-emergency-btn" class="mt-6 w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700 transition">
+                        เข้าสู่โหมดฉุกเฉิน
+                    </button>
                 </div>
             </div>
-
-            <!-- Real Map View Container -->
-            <div id="map-view" class="bg-white rounded-2xl p-4 flex-1 flex-col min-h-[50vh] md:min-h-0">
-                <h2 class="text-xl font-bold text-dark-blue mb-3 text-center">แผนที่เส้นทางจริง (Real Map)</h2>
-                <div id="map" class="flex-1 w-full rounded-xl"></div>
-            </div>
+             <footer class="text-center text-xs text-gray-500 pt-12 mt-8">
+                <p>สร้างจากแนวคิดโครงงาน: "การสร้างแบบจำลองเครือข่ายเพื่อเพิ่มประสิทธิภาพการส่งต่อผู้ป่วย"</p>
+             </footer>
         </div>
     </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    // --- GLOBAL STATE ---
-    let nodes = [];
-    let edges = [];
-    let shortestPath = { nodes: [], totalWeight: 0 };
-    let currentSpecialty = 'stroke';
-    let isPinMode = false;
-    let patientMarker = null;
+    <!-- Planner Page -->
+    <div id="planner-page" class="flex-page page flex-col md:flex-row h-screen overflow-hidden">
+        <aside class="w-full md:w-96 bg-white p-4 shadow-lg overflow-y-auto z-20 flex flex-col">
+            <div class="flex-grow">
+                 <button id="back-to-landing-1" class="mb-4 text-sm text-blue-600 hover:underline">&lt; กลับไปหน้าหลัก</button>
+                <header class="pb-4 border-b mb-4">
+                    <h1 class="text-2xl font-bold text-gray-800">โหมดจำลองเส้นทาง</h1>
+                    <p class="text-sm text-gray-500">เลือกโรงพยาบาลต้นทางและปลายทางเพื่อคำนวณเส้นทาง</p>
+                </header>
+                <!-- Controls for Planner -->
+                <section class="mb-4">
+                    <h2 class="text-lg font-semibold text-gray-700 mb-2">ขั้นตอนที่ 1: เลือกพื้นที่</h2>
+                    <label for="province-filter" class="text-sm font-medium text-gray-600">เลือกจังหวัด:</label>
+                    <select id="province-filter" class="mt-1 block w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5">
+                        <option value="all">แสดงทั้งหมด</option>
+                    </select>
+                </section>
+                <section>
+                    <h2 class="text-lg font-semibold text-gray-700 mb-2">ขั้นตอนที่ 2: จำลองการส่งต่อ</h2>
+                    <div class="space-y-3">
+                        <div>
+                            <label for="start-hospital" class="text-sm">จาก (รพ. ต้นทาง):</label>
+                            <select id="start-hospital" class="mt-1 block w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5" disabled>
+                                <option>โปรดเลือก รพ. ต้นทาง</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="end-hospital" class="text-sm">ถึง (รพ. ปลายทาง):</label>
+                            <select id="end-hospital" class="mt-1 block w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5" disabled>
+                                 <option>โปรดเลือก รพ. ปลายทาง</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button id="calculate-route-btn" class="mt-4 w-full bg-blue-600 text-white font-bold py-2 px-4 rounded-lg" disabled>คำนวณเส้นทาง</button>
+                    <button id="reset-btn" class="mt-2 w-full bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg">รีเซ็ต</button>
+                </section>
+                <section id="results-panel" class="mt-6 pt-4 border-t hidden">
+                    <h2 class="text-lg font-semibold">ผลการคำนวณ</h2>
+                    <div class="bg-blue-50 border-l-4 border-blue-500 p-4 rounded-r-lg mt-2">
+                        <p><strong>จาก:</strong> <span id="result-from"></span></p>
+                        <p><strong>ถึง:</strong> <span id="result-to"></span></p>
+                        <div class="pt-2 mt-2 border-t">
+                             <p class="text-xl font-bold">เวลา: <span id="result-time" class="text-blue-600"></span></p>
+                             <p>ระยะทาง: <span id="result-distance" class="text-blue-600"></span></p>
+                        </div>
+                    </div>
+                    <div id="intermediate-hospitals-section" class="mt-4 hidden">
+                        <h3 class="font-semibold text-gray-700">โรงพยาบาลที่เป็นทางผ่าน:</h3>
+                        <div id="intermediate-list" class="text-sm mt-2 space-y-2">
+                            <!-- Intermediate hospitals will be injected here -->
+                        </div>
+                    </div>
+                </section>
+                 <section class="mt-6 pt-4 border-t">
+                     <h2 class="text-lg font-semibold">เบื้องหลังการทำงาน</h2>
+                     <button id="toggle-analysis-btn" class="mt-2 w-full bg-gray-800 text-white font-bold py-2 px-4 rounded-lg">&gt; เปิดหน้าต่างการวิเคราะห์</button>
+                     <div id="analysis-panel" class="hidden mt-2 p-3 bg-black text-green-400 rounded-lg font-mono text-sm">
+                        <p class="text-xs">[ระบบ: แกนประมวลผลการวิเคราะห์ไดค์สตรา]</p>
+                        <div id="analysis-text-container" class="mt-2 whitespace-pre-wrap h-64 overflow-y-auto"><p id="analysis-text"></p></div>
+                     </div>
+                </section>
+            </div>
+        </aside>
+        <main class="flex-1"><div id="map-planner"></div></main>
+    </div>
 
-    // --- DOM ELEMENTS ---
-    const canvas = document.getElementById('network-canvas');
-    const ctx = canvas.getContext('2d');
-    const caseSelector = document.getElementById('case-selector');
-    const pathStartSelect = document.getElementById('path-start');
-    const pathEndSelect = document.getElementById('path-end');
-    const findPathBtn = document.getElementById('find-path-btn');
-    const findNearestBtn = document.getElementById('find-nearest-btn');
-    const pinModeStatus = document.getElementById('pin-mode-status');
-    const resultText = document.getElementById('result-text');
-    const showMapBtn = document.getElementById('show-map-btn');
-    const showGraphBtn = document.getElementById('show-graph-btn');
-    const mapView = document.getElementById('map-view');
-    const graphView = document.getElementById('graph-view');
+    <!-- Emergency Page -->
+    <div id="emergency-page" class="flex-page page flex-col md:flex-row h-screen overflow-hidden">
+         <aside class="w-full md:w-96 bg-white p-4 shadow-lg overflow-y-auto z-20 flex flex-col">
+            <div class="flex-grow">
+                 <button id="back-to-landing-2" class="mb-4 text-sm text-blue-600 hover:underline">&lt; กลับไปหน้าหลัก</button>
+                <header class="pb-4 border-b mb-4">
+                    <h1 class="text-2xl font-bold text-red-600">โหมดค้นหาฉุกเฉิน</h1>
+                    <p class="text-sm text-gray-500">ค้นหาโรงพยาบาลที่ใกล้และเหมาะสมที่สุด</p>
+                </header>
+                <section>
+                    <div class="space-y-3">
+                         <div>
+                            <label for="emergency-case" class="text-sm font-medium">เลือกประเภทเหตุฉุกเฉิน:</label>
+                            <select id="emergency-case" class="mt-1 block w-full bg-gray-50 border border-gray-300 rounded-lg p-2.5">
+                                <option value="general">อุบัติเหตุ / ฉุกเฉินทั่วไป</option>
+                                <option value="stroke">โรคหลอดเลือดสมอง (Stroke)</option>
+                                <option value="heart">โรคหัวใจ</option>
+                                <option value="er-icu">ห้องฉุกเฉิน/ห้องไอซียู (ER/ICU)</option>
+                                <option value="trauma">อุบัติเหตุร้ายแรง/เทรามา</option>
+                            </select>
+                        </div>
+                        <button id="find-location-btn" class="w-full bg-red-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-red-700 transition flex items-center justify-center space-x-2">
+                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                             <span>ค้นหาโรงพยาบาล</span>
+                        </button>
+                        <button id="test-location-btn" class="w-full bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600 transition">ทดสอบตำแหน่ง</button>
+                        <button id="reset-emergency-btn" class="w-full bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300 transition">รีเซ็ต</button>
+                        <p id="emergency-status" class="text-center text-sm text-gray-500 h-10 flex items-center justify-center"></p>
+                        
+                        <!-- Help section -->
+                        <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-xs">
+                            <p class="font-semibold text-yellow-800 mb-1">💡 หากไม่สามารถหาตำแหน่งได้:</p>
+                            <ul class="text-yellow-700 space-y-1 ml-4">
+                                <li>• อนุญาตให้เว็บไซต์เข้าถึงตำแหน่งใน Browser</li>
+                                <li>• เปิด Location Services ในอุปกรณ์</li>
+                                <li>• ตรวจสอบการเชื่อมต่อ GPS</li>
+                                <li>• ใช้ HTTPS แทน HTTP</li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+                 <section id="emergency-results-panel" class="mt-6 pt-4 border-t hidden">
+                    <h2 class="text-lg font-semibold text-gray-700 mb-2">แผนการเดินทางฉุกเฉิน</h2>
+                    <div id="emergency-results-content" class="space-y-3">
+                        <!-- Route details will be injected here -->
+                    </div>
+                    <div id="emergency-intermediate-section" class="mt-4 hidden">
+                        <h3 class="font-semibold text-gray-700">โรงพยาบาลที่เป็นทางผ่าน:</h3>
+                        <ul id="emergency-intermediate-list" class="text-sm mt-2 space-y-2">
+                            <!-- Intermediate hospitals will be injected here -->
+                        </ul>
+                    </div>
+                </section>
+            </div>
+        </aside>
+        <main class="flex-1"><div id="map-emergency"></div></main>
+    </div>
 
-    // --- MAP INITIALIZATION ---
-    const map = L.map('map').setView([18.7883, 98.9853], 9);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
-    let routePolyline = null;
-    const hospitalMarkers = L.layerGroup().addTo(map);
-
-    // --- ICONS ---
-    const specialtyIcons = {
-        'heart': L.icon({ iconUrl: 'https://img.icons8.com/plasticine/100/heart-with-pulse.png', iconSize: [40, 40] }),
-        'stroke': L.icon({ iconUrl: 'https://img.icons8.com/plasticine/100/brain.png', iconSize: [40, 40] }),
-        'trauma': L.icon({ iconUrl: 'https://img.icons8.com/plasticine/100/hospital-bed.png', iconSize: [40, 40] }),
-        'junction': L.icon({ iconUrl: 'https://img.icons8.com/plasticine/100/waypoint-map.png', iconSize: [30, 30] }),
-        'default': L.icon({ iconUrl: 'https://img.icons8.com/plasticine/100/hospital.png', iconSize: [35, 35] })
-    };
-    const patientIcon = L.icon({ iconUrl: 'https://img.icons8.com/plasticine/100/ambulance.png', iconSize: [50, 50] });
-
-    // --- DATA ---
-    const ALL_DATA = {
-        nodes: [
-            { id: 0, name: 'รพ.ศรีสังวาลย์', x: 100, y: 250, lat: 19.292, lon: 97.971, specialties: ['trauma', 'general'] },
-            { id: 1, name: 'รพ.ปาย', x: 300, y: 150, lat: 19.362, lon: 98.439, specialties: ['general'] },
-            { id: 2, name: 'รพ.แม่สะเรียง', x: 150, y: 500, lat: 18.156, lon: 97.933, specialties: ['general'] },
-            { id: 3, name: 'แยกแม่มาลัย', x: 500, y: 250, lat: 18.995, lon: 98.857, specialties: ['junction'] },
-            { id: 4, name: 'รพ.นครพิงค์', x: 600, y: 180, lat: 18.854, lon: 98.966, specialties: ['heart', 'trauma'] },
-            { id: 5, name: 'รพ.มหาราชนครเชียงใหม่', x: 620, y: 320, lat: 18.788, lon: 98.975, specialties: ['heart', 'stroke', 'trauma'] },
-            { id: 6, name: 'รพ.เชียงใหม่ราม', x: 580, y: 280, lat: 18.796, lon: 98.973, specialties: ['heart', 'stroke'] },
-            { id: 7, name: 'รพ.กรุงเทพเชียงใหม่', x: 680, y: 380, lat: 18.775, lon: 99.018, specialties: ['heart', 'stroke'] },
-            { id: 8, name: 'รพ.ลานนา', x: 650, y: 220, lat: 18.811, lon: 99.004, specialties: ['trauma'] },
-        ],
-        edges: [
-            { from: 0, to: 1, weight: 150 }, { from: 1, to: 3, weight: 120 },
-            { from: 3, to: 4, weight: 35 }, { from: 3, to: 6, weight: 40 },
-            { from: 3, to: 8, weight: 30 }, { from: 4, to: 8, weight: 15 },
-            { from: 6, to: 5, weight: 10 }, { from: 5, to: 7, weight: 15 },
-            { from: 0, to: 2, weight: 180 },
-        ]
-    };
-    
-    // --- CORE LOGIC ---
-    function setupForSpecialty(specialty) {
-        currentSpecialty = specialty;
-        shortestPath = { nodes: [], totalWeight: 0 };
+    <script>
+        // --- DATA INITIALIZATION ---
+        const hospitalData = [
+            { "Province": "แม่ฮ่องสอน", "Hospital_TH": "โรงพยาบาลศรีสังวาลย์", "Hospital_EN": "Srisangwan Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "เมืองแม่ฮ่องสอน", "Latitude": 19.298897, "Longitude": 97.97137, "Specialty": "" },
+            { "Province": "แม่ฮ่องสอน", "Hospital_TH": "โรงพยาบาลปาย", "Hospital_EN": "Pai Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "ปาย", "Latitude": 19.3619, "Longitude": 98.43785, "Specialty": "" },
+            { "Province": "แม่ฮ่องสอน", "Hospital_TH": "โรงพยาบาลแม่สะเรียง", "Hospital_EN": "Mae Sariang Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "แม่สะเรียง", "Latitude": 18.16239, "Longitude": 97.93987, "Specialty": "" },
+            { "Province": "แม่ฮ่องสอน", "Hospital_TH": "โรงพยาบาลขุนยวม", "Hospital_EN": "Khun Yuam Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "ขุนยวม", "Latitude": 18.830595, "Longitude": 97.936262, "Specialty": "" },
+            { "Province": "แม่ฮ่องสอน", "Hospital_TH": "โรงพยาบาลแม่ลาน้อย", "Hospital_EN": "Mae La Noi Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "แม่ลาน้อย", "Latitude": 18.37993686, "Longitude": 97.94303051, "Specialty": "" },
+            { "Province": "แม่ฮ่องสอน", "Hospital_TH": "โรงพยาบาลปางมะผ้า", "Hospital_EN": "Pang Mapha Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "ปางมะผ้า", "Latitude": 19.52418, "Longitude": 98.24267, "Specialty": "" },
+            { "Province": "แม่ฮ่องสอน", "Hospital_TH": "โรงพยาบาลสบเมย", "Hospital_EN": "Sop Moei Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "สบเมย", "Latitude": 17.96412, "Longitude": 97.93135, "Specialty": "" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลมหาราชนครเชียงใหม่ (สวนดอก)", "Hospital_EN": "Maharaj Nakorn Chiang Mai Hospital (Suan Dok)", "Type": "โรงเรียนแพทย์/เชี่ยวชาญ", "District": "เมืองเชียงใหม่", "Latitude": 18.789598, "Longitude": 98.974269, "Specialty": "โรคหลอดเลือดสมอง สวนดอก มช" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "ศูนย์ศรีพัฒน์ คณะแพทยศาสตร์ มช.", "Hospital_EN": "Sriphat Medical Center (CMU)", "Type": "โรงเรียนแพทย์/เชี่ยวชาญ", "District": "เมืองเชียงใหม่", "Latitude": 18.78938, "Longitude": 98.97748, "Specialty": "โรคหัวใจ ศรีพัฒน์ สวนดอก" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลนครพิงค์", "Hospital_EN": "Nakornping Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "แม่ริม", "Latitude": 18.85138, "Longitude": 98.96813, "Specialty": "โรคหลอดเลือดสมองและหัวใจ" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลเชียงใหม่ ราม", "Hospital_EN": "Chiang Mai Ram Hospital", "Type": "เอกชน ขนาดใหญ่", "District": "เมืองเชียงใหม่", "Latitude": 18.794884, "Longitude": 98.977826, "Specialty": "โรคหัวใจ/หลอดเลือด" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลกรุงเทพเชียงใหม่", "Hospital_EN": "Bangkok Hospital Chiang Mai", "Type": "เอกชน ขนาดใหญ่", "District": "เมืองเชียงใหม่", "Latitude": 18.786686, "Longitude": 99.026436, "Specialty": "โรคหัวใจ/หลอดเลือด" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลแมคคอร์มิค", "Hospital_EN": "McCormick Hospital", "Type": "เอกชน", "District": "เมืองเชียงใหม่", "Latitude": 18.798017, "Longitude": 99.010259, "Specialty": "ER/ICU ทั่วไป" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลราชเวช เชียงใหม่", "Hospital_EN": "Rajavej Chiang Mai Hospital", "Type": "เอกชน", "District": "เมืองเชียงใหม่", "Latitude": 18.766808, "Longitude": 99.004369, "Specialty": "ER/หัวใจ" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลล้านนา", "Hospital_EN": "Lanna Hospital", "Type": "เอกชน", "District": "เมืองเชียงใหม่", "Latitude": 18.812271, "Longitude": 98.991086, "Specialty": "ER/ICU" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลเทพปัญญา", "Hospital_EN": "Theppanya Hospital", "Type": "เอกชน", "District": "เมืองเชียงใหม่", "Latitude": 18.810143, "Longitude": 99.01135, "Specialty": "ER/ICU" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลจอมทอง", "Hospital_EN": "Chom Thong Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "จอมทอง", "Latitude": 18.42065, "Longitude": 98.6756, "Specialty": "" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลฝาง", "Hospital_EN": "Fang Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "ฝาง", "Latitude": 19.92212, "Longitude": 99.21332, "Specialty": "" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลสันกำแพง", "Hospital_EN": "San Kamphaeng Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "สันกำแพง", "Latitude": 18.74719, "Longitude": 99.13032, "Specialty": "" },
+            { "Province": "เชียงใหม่", "Hospital_TH": "โรงพยาบาลสันทราย", "Hospital_EN": "San Sai Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "สันทราย", "Latitude": 18.87763, "Longitude": 99.05284, "Specialty": "" },
+            { "Province": "เชียงราย", "Hospital_TH": "โรงพยาบาลเชียงรายประชานุเคราะห์", "Hospital_EN": "Chiangrai Prachanukroh Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "เมืองเชียงราย", "Latitude": 19.91428, "Longitude": 99.84157, "Specialty": "โรคหลอดเลือดสมองและหัวใจ" },
+            { "Province": "เชียงราย", "Hospital_TH": "โรงพยาบาลเกษมราษฎร์ ศรีบุรินทร์", "Hospital_EN": "Kasemrad Sriburin General Hospital", "Type": "เอกชน ขนาดใหญ่", "District": "เมืองเชียงราย", "Latitude": 19.92341, "Longitude": 99.82902, "Specialty": "โรคหัวใจ" },
+            { "Province": "เชียงราย", "Hospital_TH": "โรงพยาบาลโอเวอร์บรู๊ค", "Hospital_EN": "Overbrook Hospital", "Type": "เอกชน", "District": "เมืองเชียงราย", "Latitude": 19.91139, "Longitude": 99.83278, "Specialty": "" },
+            { "Province": "เชียงราย", "Hospital_TH": "โรงพยาบาลสมเด็จพระญาณสังวร", "Hospital_EN": "Somdejphrayanasangworn Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "เวียงชัย", "Latitude": 19.86533, "Longitude": 99.96766, "Specialty": "" },
+            { "Province": "เชียงราย", "Hospital_TH": "โรงพยาบาลแม่สาย", "Hospital_EN": "Mae Sai Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "แม่สาย", "Latitude": 20.43075, "Longitude": 99.88562, "Specialty": "" },
+            { "Province": "พะเยา", "Hospital_TH": "โรงพยาบาลพะเยา", "Hospital_EN": "Phayao Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "เมืองพะเยา", "Latitude": 19.1802, "Longitude": 99.8821, "Specialty": "โรคหลอดเลือดสมองและหัวใจ" },
+            { "Province": "พะเยา", "Hospital_TH": "โรงพยาบาลเชียงคำ", "Hospital_EN": "Chiangkham Hospital", "Type": "โรงพยาบาลชุมชน (หลัก)", "District": "เชียงคำ", "Latitude": 19.5317, "Longitude": 100.297, "Specialty": "" },
+            { "Province": "พะเยา", "Hospital_TH": "โรงพยาบาลมหาวิทยาลัยพะเยา", "Hospital_EN": "University of Phayao Medical Center and Hospital", "Type": "โรงเรียนแพทย์/เชี่ยวชาญ", "District": "เมืองพะเยา", "Latitude": 19.03056, "Longitude": 99.91833, "Specialty": "โรคหัวใจ" },
+            { "Province": "น่าน", "Hospital_TH": "โรงพยาบาลน่าน", "Hospital_EN": "Nan Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "เมืองน่าน", "Latitude": 18.7731, "Longitude": 100.767, "Specialty": "โรคหลอดเลือดสมองและหัวใจ" },
+            { "Province": "ลำปาง", "Hospital_TH": "โรงพยาบาลลำปาง", "Hospital_EN": "Lampang Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "เมืองลำปาง", "Latitude": 18.2831, "Longitude": 99.4893, "Specialty": "โรคหลอดเลือดสมองและหัวใจ" },
+            { "Province": "ลำปาง", "Hospital_TH": "โรงพยาบาลค่ายสุรศักดิ์มนตรี", "Hospital_EN": "Fort Surasakmontri Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "เมืองลำปาง", "Latitude": 18.29139, "Longitude": 99.51333, "Specialty": "" },
+            { "Province": "ลำพูน", "Hospital_TH": "โรงพยาบาลลำพูน", "Hospital_EN": "Lamphun Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "เมืองลำพูน", "Latitude": 18.5802, "Longitude": 99.0061, "Specialty": "โรคหลอดเลือดสมองและหัวใจ" },
+            { "Province": "แพร่", "Hospital_TH": "โรงพยาบาลแพร่", "Hospital_EN": "Phrae Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "เมืองแพร่", "Latitude": 18.14083, "Longitude": 100.14028, "Specialty": "โรคหลอดเลือดสมองและหัวใจ" },
+            { "Province": "อุตรดิตถ์", "Hospital_TH": "โรงพยาบาลอุตรดิตถ์", "Hospital_EN": "Uttaradit Hospital", "Type": "โรงพยาบาลทั่วไป/ศูนย์", "District": "เมืองอุตรดิตถ์", "Latitude": 17.625, "Longitude": 100.09556, "Specialty": "โรคหลอดเลือดสมองและหัวใจ" }
+        ];
         
-        if (specialty === 'all') {
-            nodes = ALL_DATA.nodes.filter(n => !n.specialties.includes('junction'));
-        } else {
-            nodes = ALL_DATA.nodes.filter(n => n.specialties.includes(specialty) || n.specialties.includes('general') || n.specialties.includes('junction'));
-        }
-        edges = ALL_DATA.edges;
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            function formatTime(minutes) {
+                if (isNaN(minutes) || minutes < 0) return 'N/A';
+                const totalMins = Math.round(minutes);
+                if (totalMins < 60) {
+                    return `${totalMins} นาที`;
+                }
+                const hours = Math.floor(totalMins / 60);
+                const remainingMinutes = totalMins % 60;
+                return `${totalMins} นาที (${hours} ชั่วโมง ${remainingMinutes} นาที)`;
+            }
 
-        updateDropdowns();
-        drawAll();
-        clearResult();
-    }
+            const pages = document.querySelectorAll('.page');
+            const landingPage = document.getElementById('landing-page');
+            const plannerPage = document.getElementById('planner-page');
+            const emergencyPage = document.getElementById('emergency-page');
 
-    function updateDropdowns() {
-        const hospitalNodes = ALL_DATA.nodes.filter(n => !n.specialties.includes('junction'));
-        const options = hospitalNodes.map(node => `<option value="${node.id}">${node.name}</option>`).join('');
-        pathStartSelect.innerHTML = options;
-        pathEndSelect.innerHTML = options;
-    }
-    
-    function dijkstra(graphNodes, graphEdges, startNodeId) {
-        const distances = {}; const prev = {}; const pq = new Set();
-        graphNodes.forEach(node => {
-            distances[node.id] = Infinity; prev[node.id] = null; pq.add(node.id);
-        });
-        distances[startNodeId] = 0;
-        while (pq.size > 0) {
-            let u = [...pq].reduce((minNode, node) => distances[node] < distances[minNode] ? node : minNode, [...pq][0]);
-            pq.delete(u);
-            const neighbors = graphEdges.filter(e => e.from === u || e.to === u);
-            for (const edge of neighbors) {
-                const v = edge.from === u ? edge.to : edge.from;
-                if (pq.has(v)) {
-                    const alt = distances[u] + edge.weight;
-                    if (alt < distances[v]) { distances[v] = alt; prev[v] = u; }
+            document.getElementById('goto-planner-btn').addEventListener('click', () => switchPage(plannerPage));
+            document.getElementById('goto-emergency-btn').addEventListener('click', () => switchPage(emergencyPage));
+            document.getElementById('back-to-landing-1').addEventListener('click', () => switchPage(landingPage));
+            document.getElementById('back-to-landing-2').addEventListener('click', () => switchPage(landingPage));
+
+            function switchPage(targetPage) {
+                pages.forEach(page => {
+                    page.classList.remove('active', 'flex-page');
+                });
+                targetPage.classList.add('active');
+                 if(targetPage.id === 'planner-page' || targetPage.id === 'emergency-page') {
+                    targetPage.classList.add('flex-page');
+                 }
+                
+                 if (targetPage.id === 'planner-page') {
+                     initPlannerApp();
+                 }
+                 if (targetPage.id === 'emergency-page') {
+                     initEmergencyApp();
+                 }
+
+                 setTimeout(() => {
+                    if (plannerMap) plannerMap.invalidateSize();
+                    if (emergencyMap) emergencyMap.invalidateSize();
+                }, 100);
+            }
+            
+            const plannerMapEl = document.getElementById('map-planner');
+            const provinceFilter = document.getElementById('province-filter');
+            const startHospitalSelect = document.getElementById('start-hospital');
+            const endHospitalSelect = document.getElementById('end-hospital');
+            const calculateBtn = document.getElementById('calculate-route-btn');
+            const resetBtn = document.getElementById('reset-btn');
+            const resultsPanel = document.getElementById('results-panel');
+            const toggleAnalysisBtn = document.getElementById('toggle-analysis-btn');
+            const analysisPanel = document.getElementById('analysis-panel');
+            const analysisTextEl = document.getElementById('analysis-text');
+            const intermediateSection = document.getElementById('intermediate-hospitals-section');
+            const intermediateList = document.getElementById('intermediate-list');
+            
+            let plannerMap, plannerMarkersLayer, plannerRoutingControl, typingInterval;
+            let currentAnalysisText = '';
+            let isPlannerInitialized = false;
+            
+            function initPlannerApp() {
+                if (isPlannerInitialized) return;
+
+                plannerMap = L.map(plannerMapEl);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(plannerMap);
+                plannerMarkersLayer = L.layerGroup().addTo(plannerMap);
+                
+                populateProvinceFilter();
+                provinceFilter.value = 'all';
+                filterAndDisplayHospitals();
+
+                provinceFilter.addEventListener('change', () => {
+                    if (plannerRoutingControl) plannerMap.removeControl(plannerRoutingControl);
+                    resultsPanel.classList.add('hidden');
+                    filterAndDisplayHospitals();
+                });
+                startHospitalSelect.addEventListener('change', validateSelections);
+                endHospitalSelect.addEventListener('change', validateSelections);
+                calculateBtn.addEventListener('click', calculatePlannerRoute);
+                resetBtn.addEventListener('click', resetPlanner);
+                toggleAnalysisBtn.addEventListener('click', toggleAnalysisPanel);
+
+                isPlannerInitialized = true;
+            }
+
+            function populateProvinceFilter() {
+                const provinces = [...new Set(hospitalData.map(h => h.Province))].sort();
+                provinces.forEach(p => provinceFilter.add(new Option(p, p)));
+            }
+
+            function filterAndDisplayHospitals() {
+                const selected = provinceFilter.value;
+                const filtered = selected === 'all' ? hospitalData : hospitalData.filter(h => h.Province === selected);
+                renderPlannerMarkers(filtered);
+                populateHospitalSelectors(filtered);
+                if (filtered.length) {
+                    const bounds = L.latLngBounds(filtered.map(h => [h.Latitude, h.Longitude]));
+                    if (bounds.isValid()) {
+                         plannerMap.fitBounds(bounds, {padding: [50, 50]});
+                    }
                 }
             }
-        }
-        return { distances, prev };
-    }
-    
-    function findShortestPath(startId, endId) {
-        const { distances, prev } = dijkstra(ALL_DATA.nodes, ALL_DATA.edges, startId);
-        const path = []; let current = endId;
-        if (prev[current] !== null || current === startId) {
-            while (current !== undefined && current !== null) { path.unshift(current); current = prev[current]; }
-        }
-        if (path.length > 0 && path[0] === startId) { return { nodes: path, totalWeight: distances[endId] }; }
-        return { nodes: [], totalWeight: Infinity };
-    }
 
-    // --- DRAWING & UI ---
-    function drawAll() {
-        drawGraph();
-        drawMapMarkers();
-        drawMapRoute();
-    }
-    
-    function drawGraph() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        edges.forEach(edge => {
-            const fromNode = ALL_DATA.nodes.find(n => n.id === edge.from);
-            const toNode = ALL_DATA.nodes.find(n => n.id === edge.to);
-            if (!fromNode || !toNode) return;
-            const isPathEdge = shortestPath.nodes.includes(fromNode.id) && shortestPath.nodes.includes(toNode.id);
-            const fromIndex = shortestPath.nodes.indexOf(fromNode.id);
-            const toIndex = shortestPath.nodes.indexOf(toNode.id);
-            const isSequential = Math.abs(fromIndex - toIndex) === 1;
-            ctx.beginPath();
-            ctx.moveTo(fromNode.x, fromNode.y);
-            ctx.lineTo(toNode.x, toNode.y);
-            ctx.strokeStyle = (isPathEdge && isSequential) ? 'var(--ambulance-red)' : '#adb5bd';
-            ctx.lineWidth = (isPathEdge && isSequential) ? 4 : 2;
-            ctx.stroke();
-            const midX = (fromNode.x + toNode.x) / 2;
-            const midY = (fromNode.y + toNode.y) / 2;
-            ctx.fillStyle = (isPathEdge && isSequential) ? 'var(--ambulance-red)' : '#495057';
-            ctx.font = '14px Sarabun';
-            ctx.fillText(edge.weight, midX + 5, midY - 5);
-        });
-        const visibleNodes = ALL_DATA.nodes.filter(n => nodes.some(vn => vn.id === n.id));
-        visibleNodes.forEach(node => {
-            const isStart = shortestPath.nodes.length > 0 && node.id === shortestPath.nodes[0];
-            const isEnd = shortestPath.nodes.length > 0 && node.id === shortestPath.nodes[shortestPath.nodes.length - 1];
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, isStart || isEnd ? 12 : 8, 0, 2 * Math.PI);
-            ctx.fillStyle = isStart ? 'var(--ambulance-blue)' : isEnd ? 'var(--ambulance-red)' : '#6c757d';
-            if (node.specialties.includes(currentSpecialty) && !node.specialties.includes('junction')) ctx.fillStyle = 'var(--ambulance-red)';
-            ctx.fill();
-            ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
-            ctx.fillStyle = '#212529'; ctx.font = 'bold 16px Sarabun';
-            ctx.fillText(node.name, node.x + 15, node.y + 5);
-        });
-    }
-
-    function resizeCanvas() {
-        const rect = canvas.parentElement.getBoundingClientRect();
-        if (canvas.width !== rect.width || canvas.height !== rect.height) {
-            canvas.width = rect.width; canvas.height = rect.height;
-            drawGraph();
-        }
-    }
-
-    function drawMapMarkers() {
-        hospitalMarkers.clearLayers();
-        nodes.forEach(node => {
-            if(node.specialties.includes('junction')) return;
-            const isSpecialist = node.specialties.includes(currentSpecialty);
-            let icon = specialtyIcons.default;
-            if (isSpecialist && specialtyIcons[currentSpecialty]) icon = specialtyIcons[currentSpecialty];
-            const marker = L.marker([node.lat, node.lon], { icon }).addTo(hospitalMarkers);
-            marker.bindPopup(`<b>${node.name}</b><br>${isSpecialist ? `เชี่ยวชาญด้าน ${currentSpecialty}` : 'รพ.ทั่วไป/ชุมชน'}`);
-        });
-    }
-
-    function drawMapRoute() {
-        if (routePolyline) map.removeLayer(routePolyline);
-        if (shortestPath.nodes.length > 1) {
-            const latlngs = shortestPath.nodes.map(id => {
-                if (id === 999) return [patientMarker.getLatLng().lat, patientMarker.getLatLng().lng];
-                const node = ALL_DATA.nodes.find(n => n.id === id);
-                return node ? [node.lat, node.lon] : null;
-            }).filter(Boolean);
-            if (latlngs.length > 1) {
-                 routePolyline = L.polyline(latlngs, { color: 'var(--ambulance-red)', weight: 5 }).addTo(map);
-                 map.fitBounds(routePolyline.getBounds().pad(0.2));
+            function renderPlannerMarkers(hospitals) {
+                plannerMarkersLayer.clearLayers();
+                hospitals.forEach(h => {
+                    L.marker([h.Latitude, h.Longitude]).addTo(plannerMarkersLayer)
+                        .bindPopup(`<strong>${h.Hospital_TH}</strong><br>${h.Type}`);
+                });
             }
-        }
-    }
 
-    function displayResult(path, startNodeName = null, endNodeName = null) {
-        if (path.nodes.length > 1 && path.totalWeight !== Infinity) {
-            const pathNames = path.nodes.map(id => {
-                if (id === 999) return 'จุดเกิดเหตุ';
-                return ALL_DATA.nodes.find(n => n.id === id)?.name || 'Unknown';
+            function populateHospitalSelectors(hospitals) {
+                startHospitalSelect.innerHTML = '<option value="">โปรดเลือก</option>';
+                endHospitalSelect.innerHTML = '<option value="">โปรดเลือก</option>';
+                hospitals.forEach((h, i) => {
+                    const optionText = `${h.Hospital_TH} (${h.District})`;
+                    startHospitalSelect.add(new Option(optionText, i));
+                    endHospitalSelect.add(new Option(optionText, i));
+                });
+                startHospitalSelect.disabled = endHospitalSelect.disabled = hospitals.length === 0;
+            }
+
+            function validateSelections() {
+                calculateBtn.disabled = !(startHospitalSelect.value && endHospitalSelect.value && startHospitalSelect.value !== endHospitalSelect.value);
+            }
+
+            function getRouteTime(startLatLng, endLatLng) {
+                return new Promise((resolve, reject) => {
+                    const tempRouter = L.Routing.control({
+                        waypoints: [startLatLng, endLatLng],
+                        createMarker: () => null,
+                        routeWhileDragging: false,
+                        addWaypoints: false,
+                        draggableWaypoints: false,
+                        fitSelectedRoutes: false,
+                        show: false
+                    });
+
+                    const onRouteFound = (e) => {
+                        const time = e.routes[0].summary.totalTime / 60;
+                        plannerMap.removeControl(tempRouter);
+                        resolve(time);
+                    };
+
+                    const onRouteError = (e) => {
+                        console.error("Intermediate route error:", e);
+                        plannerMap.removeControl(tempRouter);
+                        reject(e.error);
+                    };
+                    
+                    tempRouter.on('routesfound', onRouteFound);
+                    tempRouter.on('routingerror', onRouteError);
+                    tempRouter.addTo(plannerMap);
+                });
+            }
+
+            async function findIntermediateHospitals(startH, endH, mainRoute) {
+                intermediateSection.classList.remove('hidden');
+                intermediateList.innerHTML = '<li>กำลังค้นหา...</li>';
+
+                const routeCoordinates = mainRoute.coordinates;
+                const otherHospitals = hospitalData.filter(h => h.Hospital_TH !== startH.Hospital_TH && h.Hospital_TH !== endH.Hospital_TH);
+                
+                const candidates = otherHospitals.filter(hospital => {
+                    const hospitalLatLng = L.latLng(hospital.Latitude, hospital.Longitude);
+                    for (let i = 0; i < routeCoordinates.length; i += 5) { // Check every 5th coord for performance
+                        if (hospitalLatLng.distanceTo(routeCoordinates[i]) < 10000) { // 10km threshold
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                if (candidates.length === 0) {
+                    intermediateList.innerHTML = '<li>ไม่พบโรงพยาบาลใกล้เคียงบนเส้นทาง</li>';
+                    return;
+                }
+                
+                const startLatLng = L.latLng(startH.Latitude, startH.Longitude);
+                const results = [];
+
+                // Process candidates sequentially to avoid overwhelming the routing service
+                for (const candidate of candidates) {
+                    try {
+                        const candidateLatLng = L.latLng(candidate.Latitude, candidate.Longitude);
+                        const time = await getRouteTime(startLatLng, candidateLatLng);
+                        results.push({ name: candidate.Hospital_TH, time: time });
+                    } catch (error) {
+                        console.warn(`Could not calculate route for ${candidate.Hospital_TH}:`, error);
+                    }
+                }
+                
+                if (results.length === 0) {
+                    intermediateList.innerHTML = '<li>ไม่สามารถคำนวณเวลาสำหรับโรงพยาบาลทางผ่านได้</li>';
+                    return;
+                }
+
+                results.sort((a, b) => a.time - b.time);
+
+                intermediateList.innerHTML = results.map(r => 
+                    `<li class="border-b pb-1"><strong>${r.name}</strong><br><span class="text-gray-600">~ ${formatTime(r.time)} จากจุดเริ่มต้น</span></li>`
+                ).join('');
+            }
+
+
+            function calculatePlannerRoute() {
+                if (plannerRoutingControl) plannerMap.removeControl(plannerRoutingControl);
+                
+                const selected = provinceFilter.value;
+                const list = selected === 'all' ? hospitalData : hospitalData.filter(h => h.Province === selected);
+                const startH = list[startHospitalSelect.value];
+                const endH = list[endHospitalSelect.value];
+                
+                const startLatLng = L.latLng(startH.Latitude, startH.Longitude);
+                const endLatLng = L.latLng(endH.Latitude, endH.Longitude);
+
+                plannerRoutingControl = L.Routing.control({ waypoints: [startLatLng, endLatLng]}).addTo(plannerMap);
+                
+                plannerRoutingControl.on('routesfound', e => {
+                    const route = e.routes[0];
+                    const summary = route.summary;
+                    const totalMinutes = summary.totalTime / 60;
+                    const distanceKm = (summary.totalDistance / 1000).toFixed(2);
+                    
+                    const bounds = L.latLngBounds(startLatLng, endLatLng);
+                    plannerMap.fitBounds(bounds, { padding: [50, 50] });
+
+                    document.getElementById('result-from').textContent = startH.Hospital_TH;
+                    document.getElementById('result-to').textContent = endH.Hospital_TH;
+                    document.getElementById('result-time').textContent = formatTime(totalMinutes);
+                    document.getElementById('result-distance').textContent = `${distanceKm} กม.`;
+                    resultsPanel.classList.remove('hidden');
+                    
+                    findIntermediateHospitals(startH, endH, route);
+
+                    currentAnalysisText = `[เริ่มต้นการวิเคราะห์ข้อมูลจริง]\n\n` +
+                        `-- 1. การแปลงปัญหาเป็นกราฟ --\n` +
+                        `> เครือข่าย รพ. ถูกแปลงเป็นกราฟ G(V, E) โดยที่:\n` +
+                        `>  V (Vertices): คือเซตของโรงพยาบาล (โหนด)\n` +
+                        `>  E (Edges): คือเซตของเส้นทาง (ถนน)\n` +
+                        `>  Weight (w): คือ 'เวลาเดินทาง' (นาที)\n\n` +
+                        `> โหนดเริ่มต้น (A): ${startH.Hospital_TH}\n` +
+                        `> โหนดปลายทาง (B): ${endH.Hospital_TH}\n\n` +
+                        `-- 2. การคำนวณด้วย Dijkstra's Algorithm --\n` +
+                        `เป้าหมาย: ค้นหาระยะทางที่สั้นที่สุด d(v) จาก A ไปยังโหนดอื่นๆ (v)\n\n` +
+                        `ขั้นตอนทางคณิตศาสตร์:\n` +
+                        `1. เริ่มต้น (Initialization):\n` +
+                        `   - กำหนด d(A) = 0\n` +
+                        `   - สำหรับโหนด v อื่นๆ, กำหนด d(v) = ∞\n` +
+                        `   - สร้างเซต S สำหรับโหนดที่ยังไม่ได้เยี่ยมชม\n\n` +
+                        `2. การทำงานซ้ำ (Iteration):\n` +
+                        `   - ตราบใดที่ S ไม่ว่าง:\n` +
+                        `   a. เลือกโหนด u จาก S ที่มีค่า d(u) น้อยที่สุด\n` +
+                        `   b. สำหรับโหนดข้างเคียง v ของ u:\n` +
+                        `      ถ้่า d(u) + w(u, v) < d(v) \n` +
+                        `      ให้ปรับปรุงค่า: d(v) = d(u) + w(u, v)\n` +
+                        `   c. นำ u ออกจาก S\n\n` +
+                        `-- 3. สรุปผลลัพธ์ --\n` +
+                        `> อัลกอริทึมได้ผลลัพธ์ d(B) ซึ่งเป็นเวลาที่น้อยที่สุด\n` +
+                        `> เส้นทางที่คำนวณได้ใช้เวลา: ${formatTime(totalMinutes)}\n` +
+                        `[การวิเคราะห์เสร็จสิ้น]`;
+                });
+            }
+
+            function resetPlanner() {
+                provinceFilter.value = 'all';
+                filterAndDisplayHospitals();
+                if (plannerRoutingControl) plannerMap.removeControl(plannerRoutingControl);
+                resultsPanel.classList.add('hidden');
+                intermediateSection.classList.add('hidden');
+                intermediateList.innerHTML = '';
+                startHospitalSelect.value = "";
+                endHospitalSelect.value = "";
+                validateSelections();
+                currentAnalysisText = '';
+                analysisPanel.classList.add('hidden');
+                toggleAnalysisBtn.innerHTML = `&gt; เปิดหน้าต่างการวิเคราะห์`;
+            }
+
+            function toggleAnalysisPanel() {
+                const isHidden = analysisPanel.classList.toggle('hidden');
+                if (typingInterval) clearInterval(typingInterval);
+
+                if (!isHidden) {
+                    toggleAnalysisBtn.innerHTML = `&gt; ปิดหน้าต่างการวิเคราะห์`;
+                    const content = currentAnalysisText || 'โปรดคำนวณเส้นทางก่อน เพื่อดูการวิเคราะห์';
+                    analysisTextEl.textContent = '';
+                    let i = 0;
+                    typingInterval = setInterval(() => {
+                        if (i < content.length) {
+                             analysisTextEl.textContent += content.charAt(i);
+                             i++;
+                        } else {
+                            clearInterval(typingInterval);
+                        }
+                    }, 25);
+                } else {
+                    toggleAnalysisBtn.innerHTML = `&gt; เปิดหน้าต่างการวิเคราะห์`;
+                }
+            }
+            
+            const emergencyMapEl = document.getElementById('map-emergency');
+            const findBtn = document.getElementById('find-location-btn');
+            const testLocationBtn = document.getElementById('test-location-btn');
+            const resetEmergencyBtn = document.getElementById('reset-emergency-btn');
+            const statusEl = document.getElementById('emergency-status');
+            const emergencyCaseSelect = document.getElementById('emergency-case');
+            const resultsPanelEmergency = document.getElementById('emergency-results-panel');
+            const resultsContentEmergency = document.getElementById('emergency-results-content');
+            const emergencyIntermediateSection = document.getElementById('emergency-intermediate-section');
+            const emergencyIntermediateList = document.getElementById('emergency-intermediate-list');
+            let emergencyMap, userMarker, emergencyRoutingControl;
+            let isEmergencyInitialized = false;
+
+            const redIcon = L.icon({
+                iconUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI0NDMDAwMCIgd2lkdGg9IjM2cHgiIGhlaWdodD0iMzZweCI+PHBhdGggZD0iTTEyIDJDOC4xMyAyIDUgNS4xMyA1IDljMCA1LjI1IDcgMTMgNyAxMyA3LTcuNzUgNy0xMyA3LTlTMTUuODcgMiAxMiAyem0wIDEyLjVjLTEuOTMgMC0zLjUtMS41Ny0zLjUtMy41UzEwLjA3IDYgMTIgNiBzMy41IDEuNTcgMy41IDMuNS0xLjU3IDMuNS0zLjUgMy41eiIvPjwvc3ZnPg==',
+                iconSize: [36, 36],
+                iconAnchor: [18, 36],
+                popupAnchor: [0, -36]
             });
-            const hours = Math.floor(path.totalWeight / 60);
-            const minutes = path.totalWeight % 60;
-            const timeString = `${hours > 0 ? hours + ' ชั่วโมง ' : ''}${minutes} นาที`;
-            resultText.innerHTML = `
-                <div class="flex items-center gap-2 flex-wrap">
-                     <span class="font-bold text-ambulance-blue">${startNodeName || pathNames[0]}</span>
-                     <span>→</span>
-                     <span class="font-bold text-ambulance-red">${endNodeName || pathNames[pathNames.length-1]}</span>
-                </div>
-                <p class="font-bold text-xl my-2">ใช้เวลาประมาณ: <span class="text-dark-blue">${timeString}</span></p>
-                <p class="text-sm">เส้นทาง: ${pathNames.join(' → ')}</p>
-            `;
-        } else {
-            resultText.innerHTML = `<p class="text-ambulance-red font-bold">ไม่พบเส้นทางที่สามารถเชื่อมต่อได้</p>`;
-        }
-    }
-    
-    function clearResult(){
-        resultText.innerHTML = '<p>กรุณาเลือกการดำเนินการ</p>';
-        if (routePolyline) map.removeLayer(routePolyline);
-        if(patientMarker) map.removeLayer(patientMarker);
-        patientMarker = null;
-    }
 
-    const activeBtnClass = 'bg-dark-blue text-white shadow';
-    const inactiveBtnClass = 'bg-transparent text-gray-600';
-
-    function switchView(view) {
-        if (view === 'map') {
-            mapView.classList.remove('hidden'); mapView.classList.add('flex');
-            graphView.classList.add('hidden'); graphView.classList.remove('flex');
-            showMapBtn.className = `flex-1 py-2 px-4 rounded-lg font-bold transition-all ${activeBtnClass}`;
-            showGraphBtn.className = `flex-1 py-2 px-4 rounded-lg font-bold transition-all ${inactiveBtnClass}`;
-            setTimeout(() => map.invalidateSize(), 100);
-        } else {
-            graphView.classList.remove('hidden'); graphView.classList.add('flex');
-            mapView.classList.add('hidden'); mapView.classList.remove('flex');
-            showGraphBtn.className = `flex-1 py-2 px-4 rounded-lg font-bold transition-all ${activeBtnClass}`;
-            showMapBtn.className = `flex-1 py-2 px-4 rounded-lg font-bold transition-all ${inactiveBtnClass}`;
-            resizeCanvas();
-        }
-    }
-
-    // --- EVENT LISTENERS ---
-    caseSelector.addEventListener('change', (e) => setupForSpecialty(e.target.value));
-    findPathBtn.addEventListener('click', () => {
-        const startId = parseInt(pathStartSelect.value);
-        const endId = parseInt(pathEndSelect.value);
-        if (startId === endId) {
-            shortestPath = { nodes: [], totalWeight: 0 };
-            resultText.innerHTML = `<p class="text-ambulance-red font-bold">กรุณาเลือกโรงพยาบาลเริ่มต้นและปลายทางที่แตกต่างกัน</p>`;
-            drawAll(); return;
-        }
-        shortestPath = findShortestPath(startId, endId);
-        displayResult(shortestPath);
-        drawAll();
-    });
-    findNearestBtn.addEventListener('click', () => {
-        isPinMode = !isPinMode;
-        pinModeStatus.textContent = isPinMode ? 'คลิกบนแผนที่เพื่อระบุจุดเกิดเหตุ' : '';
-        if(isPinMode) findNearestBtn.classList.remove('pulse-btn');
-        map.getContainer().style.cursor = isPinMode ? 'crosshair' : '';
-        if(isPinMode) switchView('map');
-    });
-    map.on('click', (e) => {
-        if (!isPinMode) return;
-        if(patientMarker) map.removeLayer(patientMarker);
-        patientMarker = L.marker(e.latlng, { icon: patientIcon }).addTo(map);
-
-        const targetNodes = ALL_DATA.nodes.filter(n => n.specialties.includes(currentSpecialty));
-        if (targetNodes.length === 0) {
-            resultText.innerHTML = `<p class="text-ambulance-red font-bold">ไม่พบโรงพยาบาลที่เชี่ยวชาญด้านนี้</p>`; return;
-        }
-        let closestGraphNode = null; let minDistance = Infinity;
-        ALL_DATA.nodes.forEach(node => {
-            const d = map.distance(e.latlng, [node.lat, node.lon]);
-            if (d < minDistance) { minDistance = d; closestGraphNode = node; }
-        });
-        const timeToClosestNode = Math.round(minDistance / 1000);
-        let bestPath = { nodes: [], totalWeight: Infinity }; let bestTargetNode = null;
-        targetNodes.forEach(targetNode => {
-            let pathFromClosest = { nodes: [], totalWeight: Infinity };
-            let totalTime;
-            if (closestGraphNode.id === targetNode.id) {
-                totalTime = timeToClosestNode;
-                pathFromClosest = { nodes: [targetNode.id], totalWeight: 0 };
-            } else {
-                pathFromClosest = findShortestPath(closestGraphNode.id, targetNode.id);
-                totalTime = timeToClosestNode + pathFromClosest.totalWeight;
+            function initEmergencyApp() {
+                if(isEmergencyInitialized) return;
+                emergencyMap = L.map(emergencyMapEl).setView([18.7883, 98.9853], 8);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(emergencyMap);
+                findBtn.addEventListener('click', findEmergencyRoute);
+                testLocationBtn.addEventListener('click', testLocation);
+                resetEmergencyBtn.addEventListener('click', resetEmergencyMap);
+                isEmergencyInitialized = true;
             }
-            if (pathFromClosest.totalWeight !== Infinity && totalTime < bestPath.totalWeight) {
-                bestPath = { nodes: [999, ...pathFromClosest.nodes], totalWeight: totalTime };
-                bestTargetNode = targetNode;
+            
+            function getEmergencyRouteTime(startLatLng, endLatLng) {
+                return new Promise((resolve, reject) => {
+                    const tempRouter = L.Routing.control({
+                        waypoints: [startLatLng, endLatLng],
+                        createMarker: () => null,
+                        routeWhileDragging: false,
+                        addWaypoints: false,
+                        draggableWaypoints: false,
+                        fitSelectedRoutes: false,
+                        show: false
+                    });
+
+                    const onRouteFound = (e) => {
+                        const time = e.routes[0].summary.totalTime / 60;
+                        emergencyMap.removeControl(tempRouter);
+                        resolve(time);
+                    };
+
+                    const onRouteError = (e) => {
+                        console.error("Emergency intermediate route error:", e);
+                        emergencyMap.removeControl(tempRouter);
+                        reject(e.error);
+                    };
+                    
+                    tempRouter.on('routesfound', onRouteFound);
+                    tempRouter.on('routingerror', onRouteError);
+                    tempRouter.addTo(emergencyMap);
+                });
+            }
+            
+            async function findEmergencyIntermediateHospitals(userLatLng, targetHospitals, mainRoute) {
+                emergencyIntermediateSection.classList.remove('hidden');
+                emergencyIntermediateList.innerHTML = '<li class="text-gray-500">กำลังค้นหาโรงพยาบาลทางผ่าน...</li>';
+
+                const routeCoordinates = mainRoute.coordinates;
+                const otherHospitals = hospitalData.filter(h => 
+                    !targetHospitals.some(target => target.Hospital_TH === h.Hospital_TH)
+                );
+                
+                const candidates = otherHospitals.filter(hospital => {
+                    const hospitalLatLng = L.latLng(hospital.Latitude, hospital.Longitude);
+                    for (let i = 0; i < routeCoordinates.length; i += 5) { // Check every 5th coord for performance
+                        if (hospitalLatLng.distanceTo(routeCoordinates[i]) < 8000) { // 8km threshold for emergency
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                if (candidates.length === 0) {
+                    emergencyIntermediateList.innerHTML = '<li class="text-gray-500">ไม่พบโรงพยาบาลใกล้เคียงบนเส้นทาง</li>';
+                    return;
+                }
+                
+                const results = [];
+
+                // Process candidates sequentially to avoid overwhelming the routing service
+                for (const candidate of candidates.slice(0, 8)) { // Limit to 8 candidates for performance
+                    try {
+                        const candidateLatLng = L.latLng(candidate.Latitude, candidate.Longitude);
+                        const time = await getEmergencyRouteTime(userLatLng, candidateLatLng);
+                        results.push({ 
+                            name: candidate.Hospital_TH, 
+                            time: time,
+                            type: candidate.Type,
+                            specialty: candidate.Specialty 
+                        });
+                    } catch (error) {
+                        console.warn(`Could not calculate route for ${candidate.Hospital_TH}:`, error);
+                    }
+                }
+                
+                if (results.length === 0) {
+                    emergencyIntermediateList.innerHTML = '<li class="text-gray-500">ไม่สามารถคำนวณเวลาสำหรับโรงพยาบาลทางผ่านได้</li>';
+                    return;
+                }
+
+                results.sort((a, b) => a.time - b.time);
+
+                emergencyIntermediateList.innerHTML = results.map(r => 
+                    `<li class="border-b border-gray-200 pb-2 mb-2">
+                        <div class="font-medium text-gray-800">${r.name}</div>
+                        <div class="text-sm text-gray-600">เวลา: ${formatTime(r.time)} จากตำแหน่งคุณ</div>
+                        <div class="text-xs text-gray-500">${r.type}${r.specialty ? ` • ${r.specialty}` : ''}</div>
+                    </li>`
+                ).join('');
+            }
+            
+            function testLocation() {
+                statusEl.innerHTML = "<span class='text-blue-600'>🧪 กำลังทดสอบ Geolocation...</span>";
+                
+                // Check if geolocation is supported
+                if (!navigator.geolocation) {
+                    statusEl.innerHTML = "<span class='text-red-600 font-semibold'>❌ เบราว์เซอร์นี้ไม่รองรับ Geolocation</span>";
+                    return;
+                }
+                
+                statusEl.innerHTML = "<span class='text-green-600'>✅ Geolocation รองรับ - กำลังขอตำแหน่ง...</span>";
+                
+                const options = {
+                    enableHighAccuracy: true,
+                    timeout: 15000,
+                    maximumAge: 0
+                };
+                
+                navigator.geolocation.getCurrentPosition(
+                    position => {
+                        const lat = position.coords.latitude;
+                        const lng = position.coords.longitude;
+                        const accuracy = position.coords.accuracy;
+                        
+                        statusEl.innerHTML = `<span class='text-green-600 font-semibold'>✅ พบตำแหน่ง!</span><br>
+                                            <span class='text-xs text-gray-600'>Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}<br>
+                                            ความแม่นยำ: ${accuracy.toFixed(0)} เมตร</span>`;
+                        
+                        // Show location on map
+                        if(userMarker) emergencyMap.removeLayer(userMarker);
+                        userMarker = L.marker([lat, lng], { icon: redIcon })
+                            .addTo(emergencyMap)
+                            .bindPopup(`ตำแหน่งของคุณ<br>ความแม่นยำ: ${accuracy.toFixed(0)}m`)
+                            .openPopup();
+                        emergencyMap.setView([lat, lng], 13);
+                    },
+                    error => {
+                        let errorMessage = '';
+                        switch(error.code) {
+                            case error.PERMISSION_DENIED:
+                                errorMessage = "❌ ไม่ได้รับอนุญาต<br><span class='text-xs'>โปรดคลิก 'Allow' เมื่อ Browser ถาม</span>";
+                                break;
+                            case error.POSITION_UNAVAILABLE:
+                                errorMessage = "❌ ไม่สามารถหาตำแหน่งได้<br><span class='text-xs'>ตรวจสอบ GPS/Location Service</span>";
+                                break;
+                            case error.TIMEOUT:
+                                errorMessage = "❌ หมดเวลา<br><span class='text-xs'>ลองใหม่หรือเปลี่ยนตำแหน่ง</span>";
+                                break;
+                            default:
+                                errorMessage = "❌ เกิดข้อผิดพลาด<br><span class='text-xs'>Code: " + error.code + "</span>";
+                                break;
+                        }
+                        statusEl.innerHTML = `<span class='text-red-600 font-semibold'>${errorMessage}</span>`;
+                        console.error('Geolocation Test Error:', error);
+                    },
+                    options
+                );
+            }
+            
+            function resetEmergencyMap() {
+                if(userMarker) {
+                    emergencyMap.removeLayer(userMarker);
+                    userMarker = null;
+                }
+                if(emergencyRoutingControl) {
+                    emergencyMap.removeControl(emergencyRoutingControl);
+                    emergencyRoutingControl = null;
+                }
+                resultsPanelEmergency.classList.add('hidden');
+                emergencyIntermediateSection.classList.add('hidden');
+                resultsContentEmergency.innerHTML = '';
+                emergencyIntermediateList.innerHTML = '';
+                statusEl.innerHTML = '';
+                emergencyMap.setView([18.7883, 98.9853], 8);
+                emergencyCaseSelect.value = 'general';
+            }
+            
+            function findEmergencyRoute() {
+                statusEl.innerHTML = "<span class='text-blue-600'>🔍 กำลังขอตำแหน่งปัจจุบันของคุณ...</span>";
+                if(userMarker) emergencyMap.removeLayer(userMarker);
+                if(emergencyRoutingControl) emergencyMap.removeControl(emergencyRoutingControl);
+                resultsPanelEmergency.classList.add('hidden');
+                
+                // Check if geolocation is supported
+                if (!navigator.geolocation) {
+                    statusEl.innerHTML = "<span class='text-red-600 font-semibold'>❌ เบราว์เซอร์นี้ไม่รองรับ Geolocation</span>";
+                    return;
+                }
+                
+                // Check if using HTTPS (required for geolocation in many browsers)
+                if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                    statusEl.innerHTML = `
+                        <span class='text-orange-600 font-semibold'>⚠️ แนะนำให้ใช้ HTTPS</span><br>
+                        <span class='text-xs text-gray-600'>Geolocation อาจไม่ทำงานใน HTTP บางเบราว์เซอร์</span>
+                    `;
+                }
+                
+                const options = {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 60000
+                };
+                
+                navigator.geolocation.getCurrentPosition(
+                    position => {
+                        statusEl.textContent = "กำลังคำนวณเส้นทางฉุกเฉิน...";
+                        const userLatLng = L.latLng(position.coords.latitude, position.coords.longitude);
+                        
+                        if (userMarker) emergencyMap.removeLayer(userMarker);
+                        userMarker = L.marker(userLatLng, { icon: redIcon }).addTo(emergencyMap).bindPopup("ตำแหน่งของคุณ").openPopup();
+                        emergencyMap.setView(userLatLng, 13);
+                        
+                        const selectedCase = emergencyCaseSelect.value;
+                        let candidateHospitals = [];
+
+                        // Filter hospitals based on emergency case
+                        if (selectedCase === 'stroke') {
+                            candidateHospitals = hospitalData.filter(h => h.Specialty && 
+                                (h.Specialty.toLowerCase().includes('หลอดเลือดสมอง') || 
+                                 h.Specialty.toLowerCase().includes('stroke')));
+                        } else if (selectedCase === 'heart') {
+                            candidateHospitals = hospitalData.filter(h => h.Specialty && 
+                                (h.Specialty.toLowerCase().includes('หัวใจ') || 
+                                 h.Specialty.toLowerCase().includes('heart')));
+                        } else if (selectedCase === 'er-icu') {
+                            candidateHospitals = hospitalData.filter(h => h.Specialty && 
+                                (h.Specialty.toLowerCase().includes('er') || 
+                                 h.Specialty.toLowerCase().includes('icu')));
+                        } else if (selectedCase === 'trauma') {
+                            // For trauma cases, prioritize university hospitals, general/central hospitals, and large private hospitals
+                            candidateHospitals = hospitalData.filter(h => 
+                                h.Type === "โรงเรียนแพทย์/เชี่ยวชาญ" || 
+                                h.Type === "โรงพยาบาลทั่วไป/ศูนย์" || 
+                                h.Type === "เอกชน ขนาดใหญ่");
+                        } else { 
+                            candidateHospitals = hospitalData;
+                        }
+                        
+                        if (candidateHospitals.length === 0) {
+                            statusEl.innerHTML = "ไม่พบ รพ. ที่เชี่ยวชาญด้านนี้ในระบบ <br> <span class='text-xs text-orange-600'>กำลังค้นหา รพ. ที่ใกล้ที่สุดแทน...</span>";
+                            candidateHospitals = hospitalData;
+                        } else {
+                            statusEl.innerHTML = `พบโรงพยาบาลที่เหมาะสม ${candidateHospitals.length} แห่ง <br> <span class='text-xs text-green-600'>กำลังคำนวณเส้นทางที่เหมาะสม...</span>`;
+                        }
+
+                        const highCapabilityTypes = ["โรงพยาบาลทั่วไป/ศูนย์", "โรงเรียนแพทย์/เชี่ยวชาญ", "เอกชน ขนาดใหญ่"];
+                        
+                        let hospitalsWithDistance = candidateHospitals.map(h => ({
+                            ...h,
+                            distance: userLatLng.distanceTo([h.Latitude, h.Longitude])
+                        }));
+
+                        hospitalsWithDistance.sort((a, b) => a.distance - b.distance);
+
+                        const nearestFirstStop = hospitalsWithDistance[0];
+                        const ultimateDestination = hospitalsWithDistance.find(h => highCapabilityTypes.includes(h.Type) && h.Hospital_TH !== nearestFirstStop.Hospital_TH) || nearestFirstStop;
+
+                        let waypoints = [
+                            { latLng: userLatLng, name: "ตำแหน่งของคุณ" }
+                        ];
+
+                        if (nearestFirstStop && ultimateDestination && nearestFirstStop.Hospital_TH !== ultimateDestination.Hospital_TH) {
+                            waypoints.push({ latLng: L.latLng(nearestFirstStop.Latitude, nearestFirstStop.Longitude), name: nearestFirstStop.Hospital_TH });
+                        }
+                        if(ultimateDestination) {
+                           waypoints.push({ latLng: L.latLng(ultimateDestination.Latitude, ultimateDestination.Longitude), name: ultimateDestination.Hospital_TH });
+                        }
+                        
+                        if (waypoints.length > 1) {
+                             displayMultiStopEmergencyRoute(waypoints);
+                             setTimeout(() => {
+                                 statusEl.innerHTML = `<span class='text-green-600 font-semibold'>✅ คำนวณเส้นทางเสร็จสิ้น</span>`;
+                             }, 1000);
+                        } else {
+                            statusEl.innerHTML = `<span class='text-red-600 font-semibold'>❌ ไม่สามารถคำนวณเส้นทางได้</span>`;
+                        }
+
+                    },
+                    error => {
+                        let errorMessage = '';
+                        let helpText = '';
+                        
+                        switch(error.code) {
+                            case error.PERMISSION_DENIED:
+                                errorMessage = "ไม่ได้รับอนุญาตให้เข้าถึงตำแหน่ง";
+                                helpText = "โปรดคลิก 'Allow' เมื่อ Browser ถามและรีเฟรชหน้า";
+                                break;
+                            case error.POSITION_UNAVAILABLE:
+                                errorMessage = "ไม่สามารถหาตำแหน่งได้";
+                                helpText = "ตรวจสอบ GPS, Location Service หรือลองย้ายไปที่มีสัญญาณดีกว่า";
+                                break;
+                            case error.TIMEOUT:
+                                errorMessage = "หมดเวลาในการค้นหาตำแหน่ง";
+                                helpText = "โปรดลองใหม่อีกครั้ง หรือย้ายไปที่เปิดโล่ง";
+                                break;
+                            default:
+                                errorMessage = "เกิดข้อผิดพลาดในการหาตำแหน่ง";
+                                helpText = `Error Code: ${error.code} - โปรดลองใหม่อีกครั้ง`;
+                                break;
+                        }
+                        statusEl.innerHTML = `
+                            <span class='text-red-600 font-semibold'>❌ ${errorMessage}</span><br>
+                            <span class='text-xs text-gray-600'>${helpText}</span><br>
+                            <span class='text-xs text-blue-600 cursor-pointer underline' onclick='document.getElementById("test-location-btn").click()'>คลิกทดสอบตำแหน่ง</span>
+                        `;
+                        console.error('Geolocation Error:', error.message, error);
+                    },
+                    options
+                );
+            }
+
+            function displayMultiStopEmergencyRoute(waypoints) {
+                if (emergencyRoutingControl) emergencyMap.removeControl(emergencyRoutingControl);
+                
+                // Reset intermediate section
+                emergencyIntermediateSection.classList.add('hidden');
+                emergencyIntermediateList.innerHTML = '';
+
+                const distinctWaypoints = waypoints.filter((waypoint, index, self) =>
+                    index === self.findIndex((w) => (
+                        w.latLng.equals(waypoint.latLng)
+                    ))
+                );
+
+                if (distinctWaypoints.length < 2) {
+                    statusEl.textContent = "ไม่สามารถคำนวณเส้นทางได้ (จุดหมายซ้ำกัน)";
+                    return;
+                }
+
+                emergencyRoutingControl = L.Routing.control({ 
+                    waypoints: distinctWaypoints.map(wp => wp.latLng)
+                }).addTo(emergencyMap);
+
+                emergencyRoutingControl.on('routesfound', e => {
+                    const route = e.routes[0];
+                    const selectedCase = emergencyCaseSelect.value;
+                    let caseDisplayName = '';
+                    
+                    switch(selectedCase) {
+                        case 'stroke': caseDisplayName = 'โรคหลอดเลือดสมอง (Stroke)'; break;
+                        case 'heart': caseDisplayName = 'โรคหัวใจ'; break;
+                        case 'er-icu': caseDisplayName = 'ห้องฉุกเฉิน/ไอซียู'; break;
+                        case 'trauma': caseDisplayName = 'อุบัติเหตุร้ายแรง/เทรามา'; break;
+                        default: caseDisplayName = 'อุบัติเหตุ/ฉุกเฉินทั่วไป'; break;
+                    }
+                    
+                    resultsContentEmergency.innerHTML = `
+                        <div class="bg-red-100 border border-red-300 p-3 rounded-lg mb-4">
+                            <h3 class="font-bold text-red-800">กรณีฉุกเฉิน: ${caseDisplayName}</h3>
+                            <p class="text-sm text-red-700">แผนการเดินทางที่แนะนำ</p>
+                        </div>
+                    `;
+                    
+                    let totalTime = 0;
+                    let totalDistance = 0;
+
+                    route.legs.forEach((leg, index) => {
+                        const from = distinctWaypoints[index].name;
+                        const to = distinctWaypoints[index + 1].name;
+                        const time = leg.summary.totalTime / 60;
+                        const distance = leg.summary.totalDistance / 1000;
+                        
+                        totalTime += time;
+                        totalDistance += distance;
+                        
+                        // Find hospital info for better display
+                        const toHospital = hospitalData.find(h => h.Hospital_TH === to);
+                        const hospitalInfo = toHospital ? `
+                            <div class="text-xs text-gray-600 mt-1">
+                                <p>ประเภท: ${toHospital.Type}</p>
+                                ${toHospital.Specialty ? `<p>ความเชี่ยวชาญ: ${toHospital.Specialty}</p>` : ''}
+                            </div>
+                        ` : '';
+                        
+                        const legHtml = `
+                            <div class="bg-red-50 border-l-4 border-red-500 p-3 rounded-r-lg mb-3 emergency-card">
+                                <div class="flex items-center space-x-2 mb-2">
+                                    <div class="bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">${index + 1}</div>
+                                    <p class="font-semibold text-gray-800">${from} → ${to}</p>
+                                </div>
+                                ${hospitalInfo}
+                                <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                                    <div class="bg-white p-2 rounded">
+                                        <p class="text-gray-600">เวลา</p>
+                                        <p class="font-bold text-red-600">${formatTime(time)}</p>
+                                    </div>
+                                    <div class="bg-white p-2 rounded">
+                                        <p class="text-gray-600">ระยะทาง</p>
+                                        <p class="font-bold text-red-600">${distance.toFixed(2)} กม.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        resultsContentEmergency.innerHTML += legHtml;
+                    });
+
+                    const summaryHtml = `
+                        <div class="bg-gray-800 text-white p-4 rounded-lg mt-4">
+                            <h3 class="font-bold text-lg mb-3 flex items-center">
+                                <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 2L3 7v11a1 1 0 001 1h5v-6h2v6h5a1 1 0 001-1V7l-7-5z" clip-rule="evenodd"/>
+                                </svg>
+                                สรุปการเดินทาง
+                            </h3>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="bg-gray-700 p-3 rounded">
+                                    <p class="text-gray-300 text-sm">เวลารวม</p>
+                                    <p class="font-bold text-xl text-red-400">${formatTime(totalTime)}</p>
+                                </div>
+                                <div class="bg-gray-700 p-3 rounded">
+                                    <p class="text-gray-300 text-sm">ระยะทางรวม</p>
+                                    <p class="font-bold text-xl text-red-400">${totalDistance.toFixed(2)} กม.</p>
+                                </div>
+                            </div>
+                            <div class="mt-3 p-3 bg-red-600 rounded text-center">
+                                <p class="text-sm font-semibold">🚨 กรุณาขับขี่อย่างปลอดภัย และปฏิบัติตามกฎจราจร</p>
+                            </div>
+                        </div>
+                    `;
+                    resultsContentEmergency.innerHTML += summaryHtml;
+
+                    resultsPanelEmergency.classList.remove('hidden');
+                    
+                    // Set map bounds to show the route properly
+                    const bounds = L.latLngBounds(distinctWaypoints.map(wp => wp.latLng));
+                    emergencyMap.fitBounds(bounds, { padding: [50, 50] });
+                    
+                    // Find intermediate hospitals after main route is calculated
+                    const targetHospitals = distinctWaypoints.slice(1).map(wp => 
+                        hospitalData.find(h => h.Hospital_TH === wp.name)
+                    ).filter(h => h);
+                    
+                    if (targetHospitals.length > 0) {
+                        const userLatLng = distinctWaypoints[0].latLng;
+                        findEmergencyIntermediateHospitals(userLatLng, targetHospitals, route);
+                    }
+                });
             }
         });
-        if (bestTargetNode) {
-            shortestPath = bestPath;
-            displayResult(bestPath, "จุดเกิดเหตุ", bestTargetNode.name);
-            drawAll();
-        } else {
-            resultText.innerHTML = `<p class="text-ambulance-red font-bold">ไม่สามารถคำนวณเส้นทางได้</p>`;
-        }
-        isPinMode = false;
-        pinModeStatus.textContent = '';
-        map.getContainer().style.cursor = '';
-        findNearestBtn.classList.add('pulse-btn');
-    });
-
-    showMapBtn.addEventListener('click', () => switchView('map'));
-    showGraphBtn.addEventListener('click', () => switchView('graph'));
-
-    // --- INITIALIZE ---
-    new ResizeObserver(resizeCanvas).observe(canvas.parentElement);
-    setupForSpecialty('stroke');
-    switchView('map');
-});
-</script>
-
+    </script>
 </body>
 </html>
 
