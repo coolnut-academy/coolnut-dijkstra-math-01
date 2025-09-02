@@ -648,6 +648,101 @@
                 );
             }
             
+            function showBasicEmergencyRoute(waypoints) {
+                const selectedCase = emergencyCaseSelect.value;
+                let caseDisplayName = '';
+                
+                switch(selectedCase) {
+                    case 'stroke': caseDisplayName = 'โรคหลอดเลือดสมอง (Stroke)'; break;
+                    case 'heart': caseDisplayName = 'โรคหัวใจ'; break;
+                    case 'er-icu': caseDisplayName = 'ห้องฉุกเฉิน/ไอซียู'; break;
+                    case 'trauma': caseDisplayName = 'อุบัติเหตุร้ายแรง/เทรามา'; break;
+                    default: caseDisplayName = 'อุบัติเหตุ/ฉุกเฉินทั่วไป'; break;
+                }
+                
+                resultsContentEmergency.innerHTML = `
+                    <div class="bg-red-100 border border-red-300 p-3 rounded-lg mb-4">
+                        <h3 class="font-bold text-red-800">🚨 กรณีฉุกเฉิน: ${caseDisplayName}</h3>
+                        <p class="text-sm text-red-700">แผนการเดินทางที่แนะนำ (${waypoints.length - 1} จุดหมาย)</p>
+                    </div>
+                `;
+                
+                let totalEstimatedTime = 0;
+                let totalEstimatedDistance = 0;
+                
+                for (let i = 0; i < waypoints.length - 1; i++) {
+                    const from = waypoints[i].name;
+                    const to = waypoints[i + 1].name;
+                    
+                    // Calculate estimated distance and time
+                    const distance = waypoints[i].latLng.distanceTo(waypoints[i + 1].latLng) / 1000; // km
+                    const estimatedTime = distance / 50 * 60; // Assuming 50km/h average speed, result in minutes
+                    
+                    totalEstimatedTime += estimatedTime;
+                    totalEstimatedDistance += distance;
+                    
+                    // Find hospital info
+                    const toHospital = hospitalData.find(h => h.Hospital_TH === to);
+                    const hospitalInfo = toHospital ? `
+                        <div class="text-xs text-gray-600 mt-1">
+                            <p>ประเภท: ${toHospital.Type}</p>
+                            ${toHospital.Specialty ? `<p>ความเชี่ยวชาญ: ${toHospital.Specialty}</p>` : ''}
+                        </div>
+                    ` : '';
+                    
+                    const legHtml = `
+                        <div class="bg-orange-50 border-l-4 border-orange-500 p-3 rounded-r-lg mb-3">
+                            <div class="flex items-center space-x-2 mb-2">
+                                <div class="bg-orange-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">${i + 1}</div>
+                                <p class="font-semibold text-gray-800">${from} → ${to}</p>
+                            </div>
+                            ${hospitalInfo}
+                            <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                                <div class="bg-white p-2 rounded">
+                                    <p class="text-gray-600">เวลา (ประมาณ)</p>
+                                    <p class="font-bold text-orange-600">${formatTime(estimatedTime)}</p>
+                                </div>
+                                <div class="bg-white p-2 rounded">
+                                    <p class="text-gray-600">ระยะทาง (ประมาณ)</p>
+                                    <p class="font-bold text-orange-600">${distance.toFixed(2)} กม.</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    resultsContentEmergency.innerHTML += legHtml;
+                }
+                
+                const summaryHtml = `
+                    <div class="bg-gray-800 text-white p-4 rounded-lg mt-4">
+                        <h3 class="font-bold text-lg mb-3 flex items-center">
+                            <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 2L3 7v11a1 1 0 001 1h5v-6h2v6h5a1 1 0 001-1V7l-7-5z" clip-rule="evenodd"/>
+                            </svg>
+                            สรุปการเดินทาง (ประมาณการ)
+                        </h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-gray-700 p-3 rounded">
+                                <p class="text-gray-300 text-sm">เวลารวม</p>
+                                <p class="font-bold text-xl text-orange-400">${formatTime(totalEstimatedTime)}</p>
+                            </div>
+                            <div class="bg-gray-700 p-3 rounded">
+                                <p class="text-gray-300 text-sm">ระยะทางรวม</p>
+                                <p class="font-bold text-xl text-orange-400">${totalEstimatedDistance.toFixed(2)} กม.</p>
+                            </div>
+                        </div>
+                        <div class="mt-3 p-3 bg-orange-600 rounded text-center">
+                            <p class="text-xs font-semibold">📍 ข้อมูลนี้เป็นการประมาณการจากระยะทางตรง - เวลาจริงอาจแตกต่าง</p>
+                        </div>
+                        <div class="mt-2 p-3 bg-red-600 rounded text-center">
+                            <p class="text-sm font-semibold">🚨 กรุณาขับขี่อย่างปลอดภัย และปฏิบัติตามกฎจราจร</p>
+                        </div>
+                    </div>
+                `;
+                resultsContentEmergency.innerHTML += summaryHtml;
+                
+                resultsPanelEmergency.classList.remove('hidden');
+            }
+            
             async function findEmergencyIntermediateHospitals(waypoints, mainRoute) {
                 emergencyIntermediateSection.classList.remove('hidden');
                 emergencyIntermediateList.innerHTML = '<div class="text-gray-500 text-sm">🔍 กำลังค้นหาโรงพยาบาลทางผ่าน...</div>';
@@ -839,10 +934,8 @@
                         }
                         
                         if (waypoints.length > 1) {
+                             statusEl.innerHTML = "<span class='text-blue-600'>🔄 กำลังคำนวณเส้นทาง...</span>";
                              displayMultiStopEmergencyRoute(waypoints);
-                             setTimeout(() => {
-                                 statusEl.innerHTML = `<span class='text-green-600 font-semibold'>✅ คำนวณเส้นทางเสร็จสิ้น</span>`;
-                             }, 1000);
                         } else {
                             statusEl.innerHTML = `<span class='text-red-600 font-semibold'>❌ ไม่สามารถคำนวณเส้นทางได้</span>`;
                         }
@@ -882,7 +975,12 @@
             }
 
             function displayMultiStopEmergencyRoute(waypoints) {
-                if (emergencyRoutingControl) emergencyMap.removeControl(emergencyRoutingControl);
+                console.log('Starting emergency route display with waypoints:', waypoints);
+                
+                if (emergencyRoutingControl) {
+                    emergencyMap.removeControl(emergencyRoutingControl);
+                    emergencyRoutingControl = null;
+                }
 
                 const distinctWaypoints = waypoints.filter((waypoint, index, self) =>
                     index === self.findIndex((w) => (
@@ -890,8 +988,10 @@
                     ))
                 );
 
+                console.log('Distinct waypoints:', distinctWaypoints);
+
                 if (distinctWaypoints.length < 2) {
-                    statusEl.textContent = "ไม่สามารถคำนวณเส้นทางได้ (จุดหมายซ้ำกัน)";
+                    statusEl.innerHTML = `<span class='text-red-600 font-semibold'>❌ ไม่สามารถคำนวณเส้นทางได้ (จุดหมายซ้ำกัน)</span>`;
                     return;
                 }
 
@@ -899,6 +999,7 @@
                     waypoints: distinctWaypoints.map(wp => wp.latLng),
                     routeWhileDragging: false,
                     addWaypoints: false,
+                    show: false, // Hide default instructions panel
                     createMarker: function(i, waypoint, n) {
                         const isStart = i === 0;
                         const isEnd = i === n - 1;
@@ -921,9 +1022,16 @@
                     }
                 }).addTo(emergencyMap);
 
+                // Add debugging
+                console.log('Emergency routing control created with waypoints:', distinctWaypoints);
+                
                 emergencyRoutingControl.on('routesfound', e => {
+                    console.log('Emergency route found:', e.routes[0]);
                     const route = e.routes[0];
                     const selectedCase = emergencyCaseSelect.value;
+                    
+                    // Update status to show success
+                    statusEl.innerHTML = `<span class='text-green-600 font-semibold'>✅ คำนวณเส้นทางเสร็จสิ้น</span>`;
                     
                     // Fit map to route bounds
                     const routeBounds = L.latLngBounds(distinctWaypoints.map(wp => wp.latLng));
@@ -1019,6 +1127,24 @@
 
                     resultsPanelEmergency.classList.remove('hidden');
                 });
+                
+                emergencyRoutingControl.on('routingerror', e => {
+                    console.error('Emergency routing error:', e);
+                    statusEl.innerHTML = `<span class='text-red-600 font-semibold'>❌ ไม่สามารถคำนวณเส้นทางได้</span><br>
+                                         <span class='text-xs text-gray-600'>โปรดลองใหม่อีกครั้ง</span>`;
+                });
+                
+                // Add timeout fallback
+                setTimeout(() => {
+                    if (resultsPanelEmergency.classList.contains('hidden')) {
+                        console.warn('Routing timeout - trying fallback display');
+                        statusEl.innerHTML = `<span class='text-orange-600 font-semibold'>⚠️ การคำนวณใช้เวลานาน</span><br>
+                                             <span class='text-xs text-gray-600'>กำลังแสดงข้อมูลพื้นฐาน...</span>`;
+                        
+                        // Show basic route info even without detailed routing
+                        showBasicEmergencyRoute(distinctWaypoints);
+                    }
+                }, 15000); // 15 second timeout
             }
         });
     </script>
